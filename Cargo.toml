@@ -1,0 +1,12 @@
+[package]
+name = "repo-set"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gix  = { version = "0.73.0", features = ["blocking-network-client"]}
+clap = { version = "4.5.32", features = ["derive"] }
+anyhow = "1.0.99"
+rayon = "1.11.0"
+users = "0.11"
+
