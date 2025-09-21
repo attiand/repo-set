@@ -3,7 +3,7 @@ mod gerrit;
 mod local;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
@@ -34,20 +34,17 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Subcommand)]
 enum ListType {
+    /// List remote repositories
+    #[command(name = "--remote")]
     Remote,
+    /// List local repositories
+    #[command(name = "--local")]
     Local,
+    /// List difference between local and remote repositories
+    #[command(name = "--diff")]
     Diff,
-}
-
-impl std::fmt::Display for ListType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
-    }
 }
 
 #[derive(Subcommand)]
@@ -66,17 +63,8 @@ enum Commands {
     /// List  repositories
     #[clap(alias = "ls")]
     List {
-        #[arg(
-            name = "type",
-            short,
-            long,
-            require_equals = false,
-            value_name = "TYPE",
-            num_args = 0..=1,
-            default_value_t = ListType::Remote,
-            value_enum
-        )]
-        mode: ListType,
+        #[command(subcommand)]
+        mode: Option<ListType>,
     },
 }
 
@@ -109,22 +97,21 @@ fn main() -> Result<()> {
             let repo_list: Vec<String> = if *all {
                 gerrit::repos(&cli.host)?
                     .into_iter()
-                    .filter(|r| local::repo_exist(&cli.root, r))
+                    .filter(|r| !local::repo_exist(&cli.root, r))
                     .collect()
             } else {
                 repos.to_vec()
             };
 
+            println!("Cloning {} repositories", repo_list.len());
+
             repo_list.par_iter().for_each(|r| {
-                debug!("processing {}", r);
+                if cli.debug > 0 {
+                    debug!("processing {}", r);
+                }
                 let mut dest = cli.root.clone();
                 dest.push(r);
                 let url = format!("ssh://{}@{}/{}", get_user_name(), &cli.host, r);
-
-                if dest.exists() {
-                    eprintln!("skipping {} already exists", r);
-                    return;
-                }
 
                 debug!("cloning {}", r);
 
@@ -136,17 +123,17 @@ fn main() -> Result<()> {
             });
         }
         Commands::List { mode } => match mode {
-            ListType::Remote => {
+            Some(ListType::Remote) | None => {
                 gerrit::repos(&cli.host)?
                     .into_iter()
                     .for_each(|r| println!("{}", r));
             }
-            ListType::Local => {
+            Some(ListType::Local) => {
                 local::repos(&cli.root)?
                     .into_iter()
                     .for_each(|r| println!("{}", r));
             }
-            ListType::Diff => {}
+            Some(ListType::Diff) => {}
         },
     }
 
