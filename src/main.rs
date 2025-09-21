@@ -2,7 +2,7 @@ mod clone;
 mod gerrit;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
@@ -24,12 +24,28 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
+enum ListType {
+    Remote,
+    Local,
+    Diff,
+}
+
+impl std::fmt::Display for ListType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Clone specified repositories
     #[clap(alias = "c")]
     Clone {
-        /// Clone all avaiable repositories
+        /// Clone all available repositories
         #[clap(short, long)]
         all: bool,
 
@@ -38,8 +54,20 @@ enum Commands {
         repos: Vec<String>,
     },
     /// List  repositories
-    #[clap(alias = "l")]
-    List {},
+    #[clap(alias = "ls")]
+    List {
+        #[arg(
+            name = "type",
+            short,
+            long,
+            require_equals = false,
+            value_name = "TYPE",
+            num_args = 0..=1,
+            default_value_t = ListType::Remote,
+            value_enum
+        )]
+        mode: ListType,
+    },
 }
 
 fn get_user_name() -> String {
@@ -71,11 +99,15 @@ fn main() -> Result<()> {
                 }
             });
         }
-        Commands::List {} => {
-            gerrit::remote_repos(&cli.host)?
-                .into_iter()
-                .for_each(|r| println!("{}", r));
-        }
+        Commands::List { mode } => match mode {
+            ListType::Remote => {
+                gerrit::remote_repos(&cli.host)?
+                    .into_iter()
+                    .for_each(|r| println!("{}", r));
+            }
+            ListType::Local => {}
+            ListType::Diff => {}
+        },
     }
 
     Ok(())
