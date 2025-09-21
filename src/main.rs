@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use std::path::PathBuf;
 
 use users::{get_current_uid, get_user_by_uid};
+use colour::*;
 
 /// Manage a set of git repositories
 #[derive(Parser)]
@@ -19,6 +20,14 @@ struct Cli {
     /// Git host
     #[clap(long, num_args(1), value_name("HOST"), default_value = "nya-gerrit.its.umu.se:29418", value_hint = clap::ValueHint::Hostname)]
     host: String,
+
+    /// Print debug information
+    #[arg(long, action = clap::ArgAction::Count)]
+    debug: u8,
+
+    /// Number of threads to use, use rayon default if not specified.
+    #[arg(short, long, default_value_t = 0)]
+    threads: usize,
 
     #[command(subcommand)]
     command: Commands,
@@ -70,6 +79,12 @@ enum Commands {
     },
 }
 
+macro_rules! debug {
+   ($($tt:tt)*) => {
+        yellow_ln!($($tt)*);
+    };
+}
+
 fn get_user_name() -> String {
     let user = get_user_by_uid(get_current_uid()).expect("Can't find user");
 
@@ -78,6 +93,15 @@ fn get_user_name() -> String {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(cli.threads)
+        .build_global()
+        .unwrap();
+
+    if cli.debug > 0 {
+        debug!("using {} threads", rayon::current_num_threads());
+    }
 
     match &cli.command {
         Commands::Clone { all, repos } => {
