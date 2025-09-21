@@ -112,9 +112,17 @@ fn main() -> Result<()> {
             };
 
             repo_list.par_iter().for_each(|r| {
+                debug!("processing {}", r);
                 let mut dest = cli.root.clone();
                 dest.push(r);
                 let url = format!("ssh://{}@{}/{}", get_user_name(), &cli.host, r);
+
+                if dest.exists() {
+                    eprintln!("{} {} {}", "skipping", r, "already exists");
+                    return;
+                }
+
+                debug!("cloning {}", r);
 
                 if let Err(e) = clone::run(&url, dest.as_path()) {
                     eprintln!("{}: {}: {}", "failed to clone repo", r, e);
