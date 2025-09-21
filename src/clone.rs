@@ -7,11 +7,11 @@ pub fn run(repo_url: &str, dst: &Path) -> anyhow::Result<Repository> {
         gix::interrupt::init_handler(1, || {})?;
     }
 
-    std::fs::create_dir_all(&dst)?;
+    std::fs::create_dir_all(dst)?;
 
     let url = gix::url::parse(repo_url.into())?;
 
-    let mut prepare_clone = gix::prepare_clone(url, &dst)?;
+    let mut prepare_clone = gix::prepare_clone(url, dst)?;
 
     let (mut prepare_checkout, _) = prepare_clone
         .fetch_then_checkout(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED)?;

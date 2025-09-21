@@ -1,13 +1,14 @@
 mod clone;
 mod gerrit;
+mod local;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
-use users::{get_current_uid, get_user_by_uid};
 use colour::*;
+use users::{get_current_uid, get_user_by_uid};
 
 /// Manage a set of git repositories
 #[derive(Parser)]
@@ -59,7 +60,7 @@ enum Commands {
         all: bool,
 
         /// Repository names to clone
-        #[clap(name = "REPO-NAME", required = false, num_args = 1..)]
+        #[clap(name = "REPO-NAMEString", required = false, num_args = 1..)]
         repos: Vec<String>,
     },
     /// List  repositories
@@ -88,7 +89,7 @@ macro_rules! debug {
 fn get_user_name() -> String {
     let user = get_user_by_uid(get_current_uid()).expect("Can't find user");
 
-    return String::from(user.name().to_str().expect("Can't convert user name"));
+    String::from(user.name().to_str().expect("Can't convert user name"))
 }
 
 fn main() -> Result<()> {
@@ -105,8 +106,11 @@ fn main() -> Result<()> {
 
     match &cli.command {
         Commands::Clone { all, repos } => {
-            let repo_list = if *all {
-                gerrit::remote_repos(&cli.host)?
+            let repo_list: Vec<String> = if *all {
+                gerrit::repos(&cli.host)?
+                    .into_iter()
+                    .filter(|r| local::repo_exist(&cli.root, r))
+                    .collect()
             } else {
                 repos.to_vec()
             };
@@ -118,14 +122,14 @@ fn main() -> Result<()> {
                 let url = format!("ssh://{}@{}/{}", get_user_name(), &cli.host, r);
 
                 if dest.exists() {
-                    eprintln!("{} {} {}", "skipping", r, "already exists");
+                    eprintln!("skipping {} already exists", r);
                     return;
                 }
 
                 debug!("cloning {}", r);
 
                 if let Err(e) = clone::run(&url, dest.as_path()) {
-                    eprintln!("{}: {}: {}", "failed to clone repo", r, e);
+                    eprintln!("failed to clone repo: {}: {}", r, e);
                 } else {
                     println!("{} cloned", r)
                 }
@@ -133,11 +137,15 @@ fn main() -> Result<()> {
         }
         Commands::List { mode } => match mode {
             ListType::Remote => {
-                gerrit::remote_repos(&cli.host)?
+                gerrit::repos(&cli.host)?
                     .into_iter()
                     .for_each(|r| println!("{}", r));
             }
-            ListType::Local => {}
+            ListType::Local => {
+                local::repos(&cli.root)?
+                    .into_iter()
+                    .for_each(|r| println!("{}", r));
+            }
             ListType::Diff => {}
         },
     }

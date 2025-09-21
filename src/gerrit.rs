@@ -1,10 +1,7 @@
 use anyhow::anyhow;
 use std::process::{Command, Stdio};
 
-pub fn remote_repos(host: &str) -> anyhow::Result<Vec<String>> {
-
-    //println!("ssh ssh://{} gerrit ls-projects", host);
-
+pub fn repos(host: &str) -> anyhow::Result<Vec<String>> {
     let output = Command::new("ssh")
         .arg(format!("ssh://{}", host))
         .arg("gerrit")
@@ -15,8 +12,8 @@ pub fn remote_repos(host: &str) -> anyhow::Result<Vec<String>> {
     if output.status.success() {
         let out = String::from_utf8(output.stdout);
 
-        Ok(out?.split_whitespace().map(|s| String::from(s)).collect())
+        Ok(out?.split_whitespace().map(String::from).collect())
     } else {
-        return Err(anyhow!("Can't run gerrit ls-projects: {}", String::from_utf8_lossy(&output.stderr)));
+        Err(anyhow!("Can't run gerrit ls-projects"))
     }
 }
