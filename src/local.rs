@@ -1,3 +1,4 @@
+use gix::Repository;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,6 +8,7 @@ pub fn repo_exist(root: &Path, repo: &str) -> bool {
     dest.exists()
 }
 
+// Perhaps also check that is actually a git repo
 pub fn repos(root: &Path) -> anyhow::Result<Vec<String>> {
     let mut res = Vec::new();
 
@@ -21,4 +23,11 @@ pub fn repos(root: &Path) -> anyhow::Result<Vec<String>> {
     }
 
     Ok(res)
+}
+
+pub fn get_local_repos<T: AsRef<str>>(repos: &[T]) -> anyhow::Result<Vec<Repository>> {
+    repos
+        .iter()
+        .map(|name| gix::discover(name.as_ref()).map_err(anyhow::Error::msg))
+        .collect()
 }

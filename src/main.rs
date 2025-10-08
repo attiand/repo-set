@@ -57,7 +57,7 @@ enum Commands {
         all: bool,
 
         /// Repository names to clone
-        #[clap(name = "REPO-NAMEString", required = false, num_args = 1..)]
+        #[clap(name = "REPO-NAME", required = false, num_args = 1..)]
         repos: Vec<String>,
     },
     /// List  repositories
@@ -66,6 +66,9 @@ enum Commands {
         #[command(subcommand)]
         mode: Option<ListType>,
     },
+    /// Pull  repositories
+    #[clap(alias = "p")]
+    Pull {},
 }
 
 macro_rules! debug {
@@ -135,6 +138,15 @@ fn main() -> Result<()> {
             }
             Some(ListType::Diff) => {}
         },
+        Commands::Pull {} => {
+            let repo_names = local::repos(&cli.root)?;
+
+            let repo_names: Vec<&str> = repo_names.iter().map(AsRef::as_ref).collect();
+
+            let repos = local::get_local_repos(repo_names.as_slice());
+
+            repos.iter().for_each(|r| r.pull())
+        }
     }
 
     Ok(())
