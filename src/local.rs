@@ -1,4 +1,3 @@
-use gix::Repository;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,9 +24,11 @@ pub fn repos(root: &Path) -> anyhow::Result<Vec<String>> {
     Ok(res)
 }
 
+/*
 pub fn get_local_repos<T: AsRef<str>>(repos: &[T]) -> anyhow::Result<Vec<Repository>> {
     repos
         .iter()
         .map(|name| gix::discover(name.as_ref()).map_err(anyhow::Error::msg))
         .collect()
 }
+*/

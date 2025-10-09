@@ -1,6 +1,6 @@
-mod clone;
 mod gerrit;
 mod local;
+mod remote;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -118,7 +118,7 @@ fn main() -> Result<()> {
 
                 debug!("cloning {}", r);
 
-                if let Err(e) = clone::run(&url, dest.as_path()) {
+                if let Err(e) = remote::clone(&url, dest.as_path()) {
                     eprintln!("failed to clone repo: {}: {}", r, e);
                 } else {
                     println!("{} cloned", r)
@@ -139,6 +139,7 @@ fn main() -> Result<()> {
             Some(ListType::Diff) => {}
         },
         Commands::Pull {} => {
+            /*
             let repo_names = local::repos(&cli.root)?;
 
             let repo_names: Vec<&str> = repo_names.iter().map(AsRef::as_ref).collect();
@@ -146,6 +147,7 @@ fn main() -> Result<()> {
             let repos = local::get_local_repos(repo_names.as_slice());
 
             repos.iter().for_each(|r| r.pull())
+             */
         }
     }
 
