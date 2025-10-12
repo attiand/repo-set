@@ -9,6 +9,6 @@ clap = { version = "4.5.32", features = ["derive"] }
 anyhow = "1.0.99"
 rayon = "1.11.0"
 users = "0.11"
+console = "0.16.1"
 colour = "2.1.0"
-
 

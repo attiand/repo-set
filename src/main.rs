@@ -2,10 +2,14 @@ mod gerrit;
 mod local;
 mod remote;
 
+mod progress;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 
 use colour::*;
 use users::{get_current_uid, get_user_by_uid};
@@ -106,12 +110,16 @@ fn main() -> Result<()> {
                 repos.to_vec()
             };
 
-            println!("Cloning {} repositories", repo_list.len());
+            let (sender, receiver): (Sender<String>, Receiver<String>) = mpsc::channel();
 
-            repo_list.par_iter().for_each(|r| {
+            let consumer = progress::create_writer(receiver, repo_list.len());
+
+            repo_list.par_iter().for_each_with(sender, |s, r| {
                 if cli.debug > 0 {
                     debug!("processing {}", r);
                 }
+                s.send(r.to_string()).unwrap();
+
                 let mut dest = cli.root.clone();
                 dest.push(r);
                 let url = format!("ssh://{}@{}/{}", get_user_name(), &cli.host, r);
@@ -120,10 +128,9 @@ fn main() -> Result<()> {
 
                 if let Err(e) = remote::clone(&url, dest.as_path()) {
                     eprintln!("failed to clone repo: {}: {}", r, e);
-                } else {
-                    println!("{} cloned", r)
                 }
             });
+            consumer?.join().unwrap()?;
         }
         Commands::List { mode } => match mode {
             Some(ListType::Remote) | None => {
