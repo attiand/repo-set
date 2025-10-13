@@ -1,4 +1,4 @@
-mod gerrit;
+mod config;
 mod local;
 mod remote;
 
@@ -12,7 +12,6 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 
 use colour::*;
-use users::{get_current_uid, get_user_by_uid};
 
 /// Manage a set of git repositories
 #[derive(Parser)]
@@ -23,8 +22,8 @@ struct Cli {
     root: PathBuf,
 
     /// Git host
-    #[clap(long, num_args(1), value_name("HOST"), default_value = "nya-gerrit.its.umu.se:29418", value_hint = clap::ValueHint::Hostname)]
-    host: String,
+    #[clap(long, num_args(1), value_name("HOST"), value_hint = clap::ValueHint::Hostname)]
+    host: Option<String>,
 
     /// Print debug information
     #[arg(long, action = clap::ArgAction::Count)]
@@ -81,14 +80,9 @@ macro_rules! debug {
     };
 }
 
-fn get_user_name() -> String {
-    let user = get_user_by_uid(get_current_uid()).expect("Can't find user");
-
-    String::from(user.name().to_str().expect("Can't convert user name"))
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let config = config::Config::new()?;
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(cli.threads)
@@ -102,7 +96,7 @@ fn main() -> Result<()> {
     match &cli.command {
         Commands::Clone { all, repos } => {
             let repo_list: Vec<String> = if *all {
-                gerrit::repos(&cli.host)?
+                remote::repo_list(&config.repo.list.cmd)?
                     .into_iter()
                     .filter(|r| !local::repo_exist(&cli.root, r))
                     .collect()
@@ -122,11 +116,12 @@ fn main() -> Result<()> {
 
                 let mut dest = cli.root.clone();
                 dest.push(r);
-                let url = format!("ssh://{}@{}/{}", get_user_name(), &cli.host, r);
+
+                let url = &cli.host.as_ref().unwrap_or(&config.remote.url);
 
                 debug!("cloning {}", r);
 
-                if let Err(e) = remote::clone(&url, dest.as_path()) {
+                if let Err(e) = remote::clone(url, dest.as_path()) {
                     eprintln!("failed to clone repo: {}: {}", r, e);
                 }
             });
@@ -134,7 +129,7 @@ fn main() -> Result<()> {
         }
         Commands::List { mode } => match mode {
             Some(ListType::Remote) | None => {
-                gerrit::repos(&cli.host)?
+                remote::repo_list(&config.repo.list.cmd)?
                     .into_iter()
                     .for_each(|r| println!("{}", r));
             }
