@@ -14,7 +14,7 @@ pub fn create_writer(
         term.write_line(
             format!(
                 "   {} {} repositories",
-                style("Cloning").green().bold(),
+                style("Synchronising").green().bold(),
                 max_value
             )
             .as_str(),
@@ -27,7 +27,7 @@ pub fn create_writer(
             term.write_line(
                 format!(
                     "    {} repository {}",
-                    style("Cloning").green().bold(),
+                    style("Synchronising").green().bold(),
                     message
                 )
                 .as_str(),
@@ -37,7 +37,9 @@ pub fn create_writer(
 
         term.show_cursor()?;
         term.clear_line()?;
-        term.write_line(format!("    {} cloning", style("Finished").green().bold()).as_str())?;
+        term.write_line(
+            format!("    {} synchronising", style("Finished").green().bold()).as_str(),
+        )?;
         Ok(())
     }))
 }
