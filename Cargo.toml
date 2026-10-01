@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-git2 = "0.21.0"
+git2 = { version = "0.21.0", features = ["ssh", "https"] }
 clap = { version = "4.6.7", features = ["derive"] }
 anyhow = "1.0.104"
-rayon = "1.12.0"
+crossbeam-channel = "0.5"
 console = "0.16.6"
 colour = "2.1.0"
 toml = "1.1.6"

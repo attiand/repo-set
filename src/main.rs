@@ -1,15 +1,14 @@
 mod config;
 mod local;
+mod pool;
 mod remote;
 
 mod progress;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use rayon::prelude::*;
+use crossbeam_channel::unbounded;
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
 
 use colour::*;
 
@@ -29,7 +28,7 @@ struct Cli {
     #[arg(long, action = clap::ArgAction::Count)]
     debug: u8,
 
-    /// Number of threads to use, use rayon default if not specified.
+    /// Number of worker threads to use, defaults to an I/O-friendly count if not specified.
     #[arg(short, long, default_value_t = 0)]
     threads: usize,
 
@@ -56,8 +55,12 @@ enum Commands {
     #[clap(alias = "c")]
     Clone {
         /// Repository names to clone
-        #[clap(name = "REPO-NAME", required = true, num_args = 1..)]
+        #[clap(value_name = "REPO-NAME", num_args = 1.., required_unless_present = "all")]
         repos: Vec<String>,
+
+        /// Clone all repositories
+        #[arg(long, default_value_t = false, conflicts_with = "repos")]
+        all: bool,
     },
     /// List repositories
     #[clap(alias = "ls")]
@@ -85,33 +88,46 @@ fn main() -> Result<()> {
     let config = config::Config::new()?;
     let base_url = &cli.host.as_ref().unwrap_or(&config.remote.url);
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(cli.threads)
-        .build_global()
-        .unwrap();
-
     if cli.debug > 0 {
-        debug!("using {} threads", rayon::current_num_threads());
+        debug!(
+            "using {} worker threads",
+            pool::worker_count(cli.threads, usize::MAX)
+        );
     }
 
     match &cli.command {
-        Commands::Clone { repos } => {
-            repos.par_iter().for_each(|r| {
+        Commands::Clone { repos, all } => {
+
+            let r = if *all {
+                remote::repo_list(&config.repo.list.cmd)?
+            } else {
+                repos.clone()
+            };
+
+            let (sender, receiver) = unbounded::<progress::Update>();
+
+            let consumer = progress::create_writer(receiver, r.len(), "Cloning");
+
+            pool::for_each_io(&r, cli.threads, |r| {
                 let mut dest = cli.root.clone();
                 dest.push(r);
 
-                println!("cloning {}", r);
-
                 let repo_url = format!("{}/{}", base_url, r);
 
-                if cli.debug > 0 {
-                    debug!("cloning {}", repo_url);
-                }
+                let error = remote::clone(repo_url.as_ref(), dest.as_path())
+                    .err()
+                    .map(|e| e.to_string());
 
-                if let Err(e) = remote::clone(repo_url.as_ref(), dest.as_path()) {
-                    eprintln!("failed to clone repo: {}: {}", r, e);
-                }
+                sender
+                    .send(progress::Update {
+                        repo: r.to_string(),
+                        error,
+                    })
+                    .unwrap();
             });
+
+            drop(sender); // close the channel so the progress writer finishes
+            consumer?.join().unwrap()?;
         }
         Commands::List { mode } => match mode {
             Some(ListType::Remote) | None => {
@@ -128,33 +144,36 @@ fn main() -> Result<()> {
                 eprintln!("sorry, diff not yet implemented")
             }
         },
-        Commands::Sync {} => {
+        Commands::Sync {force: _bool} => {
             let all_repos: Vec<_> = remote::repo_list(&config.repo.list.cmd)?
                 .into_iter()
                 .collect();
 
             //.filter(|r| !local::repo_exist(&cli.root, r))
 
-            let (sender, receiver): (Sender<String>, Receiver<String>) = mpsc::channel();
+            let (sender, receiver) = unbounded::<progress::Update>();
 
-            let consumer = progress::create_writer(receiver, all_repos.len());
+            let consumer = progress::create_writer(receiver, all_repos.len(), "Synchronising");
 
-            all_repos.par_iter().for_each_with(sender, |s, r| {
-                s.send(r.to_string()).unwrap();
-
+            pool::for_each_io(&all_repos, cli.threads, |r| {
                 let mut dest = cli.root.clone();
                 dest.push(r);
 
                 let repo_url = format!("{}/{}", base_url, r);
 
-                if cli.debug > 0 {
-                    debug!("processing {}", repo_url);
-                }
+                let error = remote::clone(repo_url.as_ref(), dest.as_path())
+                    .err()
+                    .map(|e| e.to_string());
 
-                if let Err(e) = remote::clone(repo_url.as_ref(), dest.as_path()) {
-                    eprintln!("failed to clone repo: {}: {}", r, e);
-                }
+                sender
+                    .send(progress::Update {
+                        repo: r.to_string(),
+                        error,
+                    })
+                    .unwrap();
             });
+
+            drop(sender); // close the channel so the progress writer finishes
             consumer?.join().unwrap()?;
         }
     }
