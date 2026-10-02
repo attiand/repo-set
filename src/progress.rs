@@ -8,23 +8,35 @@ use std::thread::JoinHandle;
 /// A single repository's result, reported once its work has finished.
 pub struct Update {
     pub repo: String,
+    pub task: String,
     pub error: Option<String>,
+}
+
+impl Update {
+    /// Create an update that falls back to the writer's default action label.
+    pub fn new(repo: String, error: Option<String>) -> Self {
+        Update {
+            repo,
+            task: String::new(),
+            error,
+        }
+    }
+
+    /// Create an update with a specific task label shown in the progress line.
+    pub fn with_task(repo: String, task: String, error: Option<String>) -> Self {
+        Update { repo, task, error }
+    }
 }
 
 pub fn create_writer(
     receiver: Receiver<Update>,
     total: usize,
     action: &'static str,
-) -> io::Result<JoinHandle<io::Result<()>>> {
-    Ok(thread::spawn(move || -> Result<(), std::io::Error> {
+) -> JoinHandle<io::Result<()>> {
+    thread::spawn(move || -> io::Result<()> {
         let term = Term::stdout();
         term.write_line(
-            format!(
-                "   {} {} repositories",
-                style(action).green().bold(),
-                total
-            )
-            .as_str(),
+            format!("{} {} repositories", style(action).green().bold(), total).as_str(),
         )?;
 
         term.hide_cursor()?;
@@ -50,11 +62,17 @@ pub fn create_writer(
                 )?;
             }
 
+            let task = if update.task.is_empty() {
+                action
+            } else {
+                update.task.as_str()
+            };
+
             term.clear_line()?;
             term.write_line(
                 format!(
                     "   {} [{}/{}] {}",
-                    style(action).green().bold(),
+                    style(task).green().bold(),
                     done,
                     total,
                     update.repo
@@ -84,5 +102,5 @@ pub fn create_writer(
         };
         term.write_line(summary.as_str())?;
         Ok(())
-    }))
+    })
 }

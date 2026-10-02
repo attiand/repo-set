@@ -1,10 +1,9 @@
+use git2::Repository;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn repo_exist(root: &Path, repo: &str) -> bool {
-    let mut dest = PathBuf::from(root);
-    dest.push(repo);
-    dest.exists()
+    root.join(repo).exists()
 }
 
 // Perhaps also check that is actually a git repo
@@ -24,11 +23,15 @@ pub fn repos(root: &Path) -> anyhow::Result<Vec<String>> {
     Ok(res)
 }
 
-/*
-pub fn get_local_repos<T: AsRef<str>>(repos: &[T]) -> anyhow::Result<Vec<Repository>> {
-    repos
-        .iter()
-        .map(|name| gix::discover(name.as_ref()).map_err(anyhow::Error::msg))
-        .collect()
+/// Discard all local changes, resetting the working tree to HEAD.
+pub fn reset_hard(dst: &Path, debug: bool) -> anyhow::Result<()> {
+    if debug {
+        eprintln!("[debug] reset --hard {}", dst.display());
+    }
+
+    let repo = Repository::open(dst)?;
+    let head = repo.head()?.peel_to_commit()?;
+    repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+
+    Ok(())
 }
-*/

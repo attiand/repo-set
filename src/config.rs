@@ -31,7 +31,7 @@ impl Config {
         home.push(".repo-set.toml");
 
         if !fs::exists(&home)? {
-            return Err(anyhow!("No user config found (~/.repo-set.toml found)"));
+            return Err(anyhow!("No user config found (~/.repo-set.toml)"));
         }
 
         let content: String = fs::read_to_string(&home)?;

@@ -12,9 +12,9 @@ Clone specified or all remote repos to the root directory.
 
 List remote, local or difference between remote and local.
 
-## sync
+## pull
 
-Synchronize remote repos to the root directory. That is clone missing, pull existing, and remove superflous local repos.
+Pull all local repos
 
 ## help
 
