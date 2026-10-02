@@ -1,89 +1,81 @@
 use console::{Term, style};
-
 use crossbeam_channel::Receiver;
 use std::io;
-use std::thread;
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
 
-/// A single repository's result, reported once its work has finished.
-pub struct Update {
-    pub repo: String,
-    pub task: String,
-    pub error: Option<String>,
+/// Progress events emitted by worker threads. Each worker owns a `slot`, so the
+/// writer can keep one live line per worker.
+pub enum Update {
+    /// A worker slot started processing a repo.
+    Start {
+        slot: usize,
+        label: &'static str,
+        repo: String,
+    },
+    /// A worker slot finished its current repo, optionally with an error.
+    Finish { slot: usize, error: Option<String> },
 }
 
-impl Update {
-    /// Create an update that falls back to the writer's default action label.
-    pub fn new(repo: String, error: Option<String>) -> Self {
-        Update {
-            repo,
-            task: String::new(),
-            error,
-        }
-    }
-
-    /// Create an update with a specific task label shown in the progress line.
-    pub fn with_task(repo: String, task: String, error: Option<String>) -> Self {
-        Update { repo, task, error }
-    }
-}
-
+/// Spawn a writer that renders a summary line plus one live line per worker.
+/// Failures are printed as permanent lines above the live block.
 pub fn create_writer(
     receiver: Receiver<Update>,
     total: usize,
+    workers: usize,
     action: &'static str,
 ) -> JoinHandle<io::Result<()>> {
     thread::spawn(move || -> io::Result<()> {
         let term = Term::stdout();
-        term.write_line(
-            format!("{} {} repositories", style(action).green().bold(), total).as_str(),
-        )?;
-
         term.hide_cursor()?;
 
+        // Per-slot (label, repo) of the repo a worker is currently handling.
+        let mut slots: Vec<Option<(&'static str, String)>> = vec![None; workers];
         let mut done = 0usize;
         let mut failed = 0usize;
 
-        for update in receiver {
-            done += 1;
+        let mut height = draw(&term, action, total, done, &slots)?;
 
-            // Failures become permanent lines above the live progress line.
-            if let Some(err) = &update.error {
-                failed += 1;
-                term.clear_line()?;
-                term.write_line(
-                    format!(
-                        "    {} {}: {}",
-                        style("Failed").red().bold(),
-                        update.repo,
-                        err
-                    )
-                    .as_str(),
-                )?;
+        for update in receiver {
+            let mut failure = None;
+
+            match update {
+                Update::Start { slot, label, repo } => {
+                    if let Some(s) = slots.get_mut(slot) {
+                        *s = Some((label, repo));
+                    }
+                }
+                Update::Finish { slot, error } => {
+                    done += 1;
+                    if let Some(err) = error {
+                        failed += 1;
+                        let repo = slots
+                            .get(slot)
+                            .and_then(|s| s.as_ref())
+                            .map(|(_, repo)| repo.as_str())
+                            .unwrap_or("");
+                        failure = Some(format!(
+                            "    {} {}: {}",
+                            style("Failed").red().bold(),
+                            repo,
+                            err
+                        ));
+                    }
+                    if let Some(s) = slots.get_mut(slot) {
+                        *s = None;
+                    }
+                }
             }
 
-            let task = if update.task.is_empty() {
-                action
-            } else {
-                update.task.as_str()
-            };
-
-            term.clear_line()?;
-            term.write_line(
-                format!(
-                    "   {} [{}/{}] {}",
-                    style(task).green().bold(),
-                    done,
-                    total,
-                    update.repo
-                )
-                .as_str(),
-            )?;
-            term.move_cursor_up(1)?;
+            // Clear the live block so a permanent failure line lands above it.
+            term.clear_last_lines(height)?;
+            if let Some(line) = failure {
+                term.write_line(&line)?;
+            }
+            height = draw(&term, action, total, done, &slots)?;
         }
 
+        term.clear_last_lines(height)?;
         term.show_cursor()?;
-        term.clear_line()?;
 
         let summary = if failed == 0 {
             format!(
@@ -100,7 +92,34 @@ pub fn create_writer(
                 failed
             )
         };
-        term.write_line(summary.as_str())?;
+        term.write_line(&summary)?;
         Ok(())
     })
+}
+
+/// Render the summary line plus one line per worker slot; returns the block height.
+fn draw(
+    term: &Term,
+    action: &str,
+    total: usize,
+    done: usize,
+    slots: &[Option<(&'static str, String)>],
+) -> io::Result<usize> {
+    term.write_line(
+        format!(
+            "{} [{}/{}] repositories",
+            style(action).green().bold(),
+            done,
+            total
+        )
+        .as_str(),
+    )?;
+
+    let mut active = 0usize;
+    for (label, repo) in slots.iter().flatten() {
+        term.write_line(format!("   {} {}", style(label).green().bold(), repo).as_str())?;
+        active += 1;
+    }
+
+    Ok(active + 1)
 }

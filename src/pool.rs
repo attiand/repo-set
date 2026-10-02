@@ -3,10 +3,11 @@ use std::thread;
 
 /// Run `task` over every item using a pool of worker threads tuned for blocking
 /// I/O. Work is pulled from a shared queue so slow clones don't stall the others.
+/// `task` receives the worker's slot index (0..workers) and the item.
 pub fn for_each_io<T, F>(items: &[T], threads: usize, task: F)
 where
     T: Sync,
-    F: Fn(&T) + Sync,
+    F: Fn(usize, &T) + Sync,
 {
     if items.is_empty() {
         return;
@@ -21,12 +22,12 @@ where
     drop(tx); // let workers exit once the queue is drained
 
     thread::scope(|scope| {
-        for _ in 0..workers {
+        for slot in 0..workers {
             let rx = rx.clone();
             let task = &task;
             scope.spawn(move || {
                 while let Ok(item) = rx.recv() {
-                    task(item);
+                    task(slot, item);
                 }
             });
         }

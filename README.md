@@ -16,6 +16,10 @@ List remote, local or difference between remote and local.
 
 Pull all local repos
 
+## reset
+
+Reset all local repos, only `--hard` mode implemented.
+
 ## help
 
 Print help information.
@@ -24,7 +28,7 @@ Print help information.
 
 repo-set reads a configuration file in the users home directory named `.repo-set.toml`
 
-To use with a gerrit server 
+To use with a gerrit server:
 
 ```toml
 remote.url = "my-gerrit:29418"

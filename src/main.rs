@@ -101,30 +101,36 @@ fn main() -> Result<()> {
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let consumer = progress::create_writer(receiver, repos.len(), "Cloning");
+            let workers = pool::worker_count(cli.threads, repos.len());
+            let consumer = progress::create_writer(receiver, repos.len(), workers, "Cloning");
 
-            pool::for_each_io(&repos, cli.threads, |r| {
+            pool::for_each_io(&repos, cli.threads, |slot, r| {
                 let mut dest = cli.root.clone();
                 dest.push(r);
 
-                let (task, error) = if local::repo_exist(&cli.root, r) {
-                    let error = None;
-                    ("Skipping", error)
+                let skip = local::repo_exist(&cli.root, r);
+                let label = if skip { "Skipping" } else { "Cloning" };
+
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label,
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
+
+                let error = if skip {
+                    None
                 } else {
                     let repo_url = format!("{}/{}", base_url, r);
-                    let error = remote
+                    remote
                         .clone(repo_url.as_ref(), dest.as_path())
                         .err()
-                        .map(|e| e.to_string());
-                    ("Cloning", error)
+                        .map(|e| e.to_string())
                 };
 
                 sender
-                    .send(progress::Update::with_task(
-                        r.to_string(),
-                        task.to_string(),
-                        error,
-                    ))
+                    .send(progress::Update::Finish { slot, error })
                     .unwrap();
             });
 
@@ -184,19 +190,25 @@ fn main() -> Result<()> {
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let consumer = progress::create_writer(receiver, local_repos.len(), "Pulling");
+            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let consumer = progress::create_writer(receiver, local_repos.len(), workers, "Pulling");
 
-            pool::for_each_io(&local_repos, cli.threads, |r| {
+            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
                 let mut dest = cli.root.clone();
                 dest.push(r);
 
-                let error = remote
-                    .pull(dest.as_path())
-                    .err()
-                    .map(|e| e.to_string());
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label: "Pulling",
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
+
+                let error = remote.pull(dest.as_path()).err().map(|e| e.to_string());
 
                 sender
-                    .send(progress::Update::new(r.to_string(), error))
+                    .send(progress::Update::Finish { slot, error })
                     .unwrap();
             });
 
@@ -208,18 +220,28 @@ fn main() -> Result<()> {
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let consumer = progress::create_writer(receiver, local_repos.len(), "Resetting");
+            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let consumer =
+                progress::create_writer(receiver, local_repos.len(), workers, "Resetting");
 
-            pool::for_each_io(&local_repos, cli.threads, |r| {
+            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
                 let mut dest = cli.root.clone();
                 dest.push(r);
+
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label: "Resetting",
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
 
                 let error = local::reset_hard(dest.as_path(), cli.debug > 0)
                     .err()
                     .map(|e| e.to_string());
 
                 sender
-                    .send(progress::Update::new(r.to_string(), error))
+                    .send(progress::Update::Finish { slot, error })
                     .unwrap();
             });
 
