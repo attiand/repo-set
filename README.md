@@ -34,7 +34,9 @@ Print help information.
 
 # Install
 
+```bash
 cargo install --git https://github.com/attiand/repo-set.git
+```
 
 # Configuration file
 
