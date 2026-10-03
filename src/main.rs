@@ -7,7 +7,8 @@ mod status;
 mod progress;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
 use crossbeam_channel::unbounded;
 use std::path::PathBuf;
 
@@ -28,7 +29,7 @@ struct Cli {
     debug: u8,
 
     /// Repository name to ignore, may be specified multiple times
-    #[arg(long = "ignore-repos", global = true, num_args(1), value_name("REPO-NAME"))]
+    #[arg(long = "ignore-repo", num_args(1), value_name("REPO-NAME"))]
     ignore_repos: Vec<String>,
 
     /// Number of worker threads to use, defaults to an I/O-friendly count if not specified.
@@ -42,14 +43,17 @@ struct Cli {
 #[derive(Subcommand)]
 enum ListType {
     /// List remote repositories
-    #[command(name = "--remote")]
+    #[command(name = "--remote", visible_alias = "-r")]
     Remote,
     /// List local repositories
-    #[command(name = "--local")]
+    #[command(name = "--local", visible_alias = "-l")]
     Local,
     /// List difference between local and remote repositories
-    #[command(name = "--diff")]
+    #[command(name = "--diff", visible_alias = "-d")]
     Diff,
+    /// List superfluous local repositories
+    #[command(name = "--superfluous", visible_alias = "-s")]
+    Superfluous,
 }
 
 #[derive(Subcommand)]
@@ -80,10 +84,24 @@ enum Commands {
         #[arg(long, required = true)]
         hard: bool,
     },
+    /// Generate shell completion script
+    Completion {
+        /// Shell to generate the completion script for
+        #[arg(value_name = "SHELL")]
+        shell: Shell,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Commands::Completion { shell } = &cli.command {
+        let mut cmd = Cli::command();
+        let name = cmd.get_name().to_string();
+        generate(*shell, &mut cmd, name, &mut std::io::stdout());
+        return Ok(());
+    }
+
     let config = config::Config::new()?;
     let base_url = cli.host.as_ref().unwrap_or(&config.remote.url);
 
@@ -158,6 +176,7 @@ fn main() -> Result<()> {
             Some(ListType::Remote) => status::remote(&remote)?,
             Some(ListType::Local) => status::local(&local, &cli.root)?,
             Some(ListType::Diff) => status::diff(&remote, &local, &cli.root)?,
+            Some(ListType::Superfluous) => status::superfluous(&remote, &local, &cli.root)?,
             None => status::status(&remote, &local, &cli.root)?,
         },
         Commands::Pull => {
@@ -224,6 +243,7 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
+        Commands::Completion { .. } => unreachable!("handled before loading config"),
     }
 
     Ok(())

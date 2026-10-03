@@ -20,9 +20,24 @@ pub fn local(local: &Local, root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Print, on a single space-separated line, local repos that have no remote
+/// together with directories that are not git repos.
+pub fn superfluous(remote: &Remote, local: &Local, root: &Path) -> Result<()> {
+    let remote_set: HashSet<String> = remote.repo_list()?.into_iter().collect();
+
+    let mut items: Vec<String> = local
+        .repos(root)?
+        .into_iter()
+        .filter(|r| !remote_set.contains(r))
+        .collect();
+    items.extend(local.non_repos(root)?);
+
+    println!("{}", items.join(" "));
+    Ok(())
+}
+
 /// Print the +/- difference between remote and local repositories.
-pub fn diff(remote: &Remote, local: &Local, root: &Path) -> Result<()> {
-    let remote_repos = remote.repo_list()?;
+pub fn diff(remote: &Remote, local: &Local, root: &Path) -> Result<()> {    let remote_repos = remote.repo_list()?;
     let local_repos = local.repos(root)?;
 
     let remote_set: HashSet<&String> = remote_repos.iter().collect();
