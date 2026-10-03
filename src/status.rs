@@ -20,6 +20,22 @@ pub fn local(local: &Local, root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Print, for every local repo with a dirty working tree, the repo name
+/// followed by its `git status --short` output.
+pub fn dirty(local: &Local, root: &Path) -> Result<()> {
+    for repo in local.repos(root)? {
+        let entries = local.status_short(&root.join(&repo))?;
+        if entries.is_empty() {
+            continue;
+        }
+        println!("{}", style(&repo).bold());
+        entries
+            .iter()
+            .for_each(|e| println!("  {} {}", style(&e.status).red(), e.path));
+    }
+    Ok(())
+}
+
 /// Print, on a single space-separated line, local repos that have no remote
 /// together with directories that are not git repos.
 pub fn superfluous(remote: &Remote, local: &Local, root: &Path) -> Result<()> {

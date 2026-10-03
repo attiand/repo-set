@@ -78,13 +78,18 @@ enum Commands {
     /// Pull all local repositories
     #[clap(alias = "p")]
     Pull,
+    /// List local repositories with an unclean working tree (git status --short)
+    #[clap(alias = "s")]
+    Status,
     /// Reset all local repositories, discarding local changes
+    #[clap(alias = "r")]
     Reset {
         /// Reset the working tree to HEAD, discarding all local changes
         #[arg(long, required = true)]
         hard: bool,
     },
     /// Generate shell completion script
+    #[clap(alias = "comp")]
     Completion {
         /// Shell to generate the completion script for
         #[arg(value_name = "SHELL")]
@@ -209,6 +214,7 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
+        Commands::Status => status::dirty(&local, &cli.root)?,
         Commands::Reset { hard: _ } => {
             let local_repos = local.repos(&cli.root)?;
 

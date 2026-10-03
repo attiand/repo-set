@@ -1,6 +1,6 @@
 # repo-set
 
-Handles a set of git repos. A typical git command such as status prints the status of all repos in the set. The location of the local set is current working directory or specified with the `--root` option.
+Handles a set of git repos. A typical git command such as `reset` resets all repos in the set. The location of the local set is current working directory or specified with the `--root` option.
 
 Implemented sub commands:
 
@@ -19,6 +19,10 @@ Pull all local repos
 ## reset
 
 Reset all local repos, only `--hard` mode implemented.
+
+## status
+
+Print git status for each repo with changes.
 
 ## help
 
