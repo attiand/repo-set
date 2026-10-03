@@ -15,6 +15,8 @@ pub struct List {
 #[derive(Deserialize)]
 pub struct Repo {
     pub list: List,
+    #[serde(default)]
+    pub ignore: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -36,5 +38,10 @@ impl Config {
 
         let content: String = fs::read_to_string(&home)?;
         toml::from_str(content.as_str()).map_err(anyhow::Error::msg)
+    }
+
+    /// Whether a repository should be ignored by all commands.
+    pub fn is_ignored(&self, repo: &str) -> bool {
+        self.repo.ignore.iter().any(|r| r == repo)
     }
 }

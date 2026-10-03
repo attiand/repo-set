@@ -33,5 +33,7 @@ To use with a gerrit server:
 ```toml
 remote.url = "my-gerrit:29418"
 
-repo.list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
+[repo]
+list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
+ignore =["non-important-repo"]
 ```

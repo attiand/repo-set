@@ -4,13 +4,43 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Performs git remote operations, optionally logging debug output to stderr.
-pub struct Remote {
+pub struct Remote<'a> {
+    list_cmd: &'a [String],
+    ignore: &'a [String],
     debug: bool,
 }
 
-impl Remote {
-    pub fn new(debug: bool) -> Self {
-        Self { debug }
+impl<'a> Remote<'a> {
+    pub fn new(list_cmd: &'a [String], ignore: &'a [String], debug: bool) -> Self {
+        Self {
+            list_cmd,
+            ignore,
+            debug,
+        }
+    }
+
+    /// List remote repositories, excluding any configured to be ignored.
+    pub fn repo_list(&self) -> anyhow::Result<Vec<String>> {
+        let cmd = self.list_cmd;
+        let Some(program) = cmd.first() else {
+            return Ok(Vec::new());
+        };
+
+        let output = Command::new(program)
+            .args(&cmd[1..])
+            .stdin(Stdio::null())
+            .output()?;
+
+        if !output.status.success() {
+            return Err(anyhow!("Can't run command {}", program));
+        }
+
+        let out = String::from_utf8(output.stdout)?;
+        Ok(out
+            .split_whitespace()
+            .filter(|r| !self.ignore.iter().any(|i| i == r))
+            .map(String::from)
+            .collect())
     }
 
     /// Build callbacks with SSH-agent credentials and, when debugging, progress logging.
@@ -115,22 +145,4 @@ fn set_debug_callbacks(callbacks: &mut RemoteCallbacks, label: String) {
         );
         true
     });
-}
-
-pub fn repo_list(cmd: &[String]) -> anyhow::Result<Vec<String>> {
-    let Some(program) = cmd.first() else {
-        return Ok(Vec::new());
-    };
-
-    let output = Command::new(program)
-        .args(&cmd[1..])
-        .stdin(Stdio::null())
-        .output()?;
-
-    if !output.status.success() {
-        return Err(anyhow!("Can't run command {}", program));
-    }
-
-    let out = String::from_utf8(output.stdout)?;
-    Ok(out.split_whitespace().map(String::from).collect())
 }

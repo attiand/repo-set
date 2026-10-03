@@ -2,13 +2,13 @@ mod config;
 mod local;
 mod pool;
 mod remote;
+mod status;
 
 mod progress;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use crossbeam_channel::unbounded;
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Simplify managing a set of git repositories
@@ -24,8 +24,12 @@ struct Cli {
     host: Option<String>,
 
     /// Print debug information
-    #[arg(long, global = true, action = clap::ArgAction::Count)]
+    #[arg(long, action = clap::ArgAction::Count)]
     debug: u8,
+
+    /// Repository name to ignore, may be specified multiple times
+    #[arg(long = "ignore-repos", global = true, num_args(1), value_name("REPO-NAME"))]
+    ignore_repos: Vec<String>,
 
     /// Number of worker threads to use, defaults to an I/O-friendly count if not specified.
     #[arg(short, long, default_value_t = 0)]
@@ -82,7 +86,16 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = config::Config::new()?;
     let base_url = cli.host.as_ref().unwrap_or(&config.remote.url);
-    let remote = remote::Remote::new(cli.debug > 0);
+
+    // --ignore-repos overrides the ignore list from the configuration.
+    let ignore = if cli.ignore_repos.is_empty() {
+        &config.repo.ignore
+    } else {
+        &cli.ignore_repos
+    };
+
+    let remote = remote::Remote::new(&config.repo.list.cmd, ignore, cli.debug > 0);
+    let local = local::Local::new(ignore, cli.debug > 0);
 
     if cli.debug > 0 {
         eprintln!(
@@ -94,9 +107,13 @@ fn main() -> Result<()> {
     match &cli.command {
         Commands::Clone { repos, all } => {
             let repos = if *all {
-                remote::repo_list(&config.repo.list.cmd)?
+                remote.repo_list()?
             } else {
-                repos.clone()
+                repos
+                    .iter()
+                    .filter(|r| !ignore.iter().any(|i| i == *r))
+                    .cloned()
+                    .collect()
             };
 
             let (sender, receiver) = unbounded::<progress::Update>();
@@ -108,7 +125,7 @@ fn main() -> Result<()> {
                 let mut dest = cli.root.clone();
                 dest.push(r);
 
-                let skip = local::repo_exist(&cli.root, r);
+                let skip = local.repo_exist(&cli.root, r);
                 let label = if skip { "Skipping" } else { "Cloning" };
 
                 sender
@@ -138,55 +155,13 @@ fn main() -> Result<()> {
             consumer.join().unwrap()?;
         }
         Commands::List { mode } => match mode {
-            Some(ListType::Remote) => {
-                remote::repo_list(&config.repo.list.cmd)?
-                    .into_iter()
-                    .for_each(|r| println!("{}", r));
-            }
-            Some(ListType::Local) => {
-                local::repos(&cli.root)?
-                    .into_iter()
-                    .for_each(|r| println!("{}", r));
-            }
-            Some(ListType::Diff) => {
-                let remote_repos = remote::repo_list(&config.repo.list.cmd)?;
-                let local_repos = local::repos(&cli.root)?;
-
-                let remote_set: HashSet<&String> = remote_repos.iter().collect();
-                let local_set: HashSet<&String> = local_repos.iter().collect();
-
-                remote_repos
-                    .iter()
-                    .filter(|r| !local_set.contains(*r))
-                    .for_each(|r| println!("-{}", r));
-                local_repos
-                    .iter()
-                    .filter(|r| !remote_set.contains(*r))
-                    .for_each(|r| println!("+{}", r));
-            }
-            None => {
-                let remote_repos = remote::repo_list(&config.repo.list.cmd)?;
-                let local_repos = local::repos(&cli.root)?;
-
-                let remote_set: HashSet<&String> = remote_repos.iter().collect();
-                let local_set: HashSet<&String> = local_repos.iter().collect();
-
-                println!("Remote repos not present locally:");
-                remote_repos
-                    .iter()
-                    .filter(|r| !local_set.contains(*r))
-                    .for_each(|r| println!("{}", r));
-
-                println!();
-                println!("Local directories with no remote:");
-                local_repos
-                    .iter()
-                    .filter(|r| !remote_set.contains(*r))
-                    .for_each(|r| println!("{}", r));
-            }
+            Some(ListType::Remote) => status::remote(&remote)?,
+            Some(ListType::Local) => status::local(&local, &cli.root)?,
+            Some(ListType::Diff) => status::diff(&remote, &local, &cli.root)?,
+            None => status::status(&remote, &local, &cli.root)?,
         },
         Commands::Pull => {
-            let local_repos = local::repos(&cli.root)?;
+            let local_repos = local.repos(&cli.root)?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
@@ -216,7 +191,7 @@ fn main() -> Result<()> {
             consumer.join().unwrap()?;
         }
         Commands::Reset { hard: _ } => {
-            let local_repos = local::repos(&cli.root)?;
+            let local_repos = local.repos(&cli.root)?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
@@ -236,7 +211,8 @@ fn main() -> Result<()> {
                     })
                     .unwrap();
 
-                let error = local::reset_hard(dest.as_path(), cli.debug > 0)
+                let error = local
+                    .reset_hard(dest.as_path())
                     .err()
                     .map(|e| e.to_string());
 
