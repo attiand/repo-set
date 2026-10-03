@@ -74,6 +74,45 @@ impl<'a> Local<'a> {
         Ok(())
     }
 
+    /// List untracked files and directories that `clean` would remove. Ignored
+    /// files are not included.
+    pub fn clean_list(&self, dst: &Path) -> anyhow::Result<Vec<String>> {
+        let repo = Repository::open(dst)?;
+
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(true).include_ignored(false);
+
+        let mut paths = Vec::new();
+        for entry in repo.statuses(Some(&mut opts))?.iter() {
+            if entry.status().contains(git2::Status::WT_NEW)
+                && let Ok(rel) = entry.path()
+            {
+                paths.push(rel.to_string());
+            }
+        }
+
+        Ok(paths)
+    }
+
+    /// Remove untracked files and directories, like `git clean -fd`. Ignored
+    /// files are left in place.
+    pub fn clean(&self, dst: &Path) -> anyhow::Result<()> {
+        if self.debug {
+            eprintln!("[debug] clean {}", dst.display());
+        }
+
+        for rel in self.clean_list(dst)? {
+            let full = dst.join(&rel);
+            if full.is_dir() {
+                fs::remove_dir_all(&full)?;
+            } else if full.exists() {
+                fs::remove_file(&full)?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Return the working tree status as `git status --short` entries. An empty
     /// vector means the working tree is clean.
     pub fn status_short(&self, dst: &Path) -> anyhow::Result<Vec<FileStatus>> {

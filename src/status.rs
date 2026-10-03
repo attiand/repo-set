@@ -36,6 +36,25 @@ pub fn dirty(local: &Local, root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Print, for every local repo, the untracked files and directories that
+/// `clean` would remove, grouped by repo name.
+pub fn clean_preview(local: &Local, root: &Path) -> Result<()> {
+
+    if !local.repos(root)?.is_empty() {
+        println!("{}", "Specify --force to remove the following:");
+    }
+
+    for repo in local.repos(root)? {
+        let paths = local.clean_list(&root.join(&repo))?;
+        if paths.is_empty() {
+            continue;
+        }
+        println!("{}", style(&repo).bold());
+        paths.iter().for_each(|p| println!("  {}", p));
+    }
+    Ok(())
+}
+
 /// Print, on a single space-separated line, local repos that have no remote
 /// together with directories that are not git repos.
 pub fn superfluous(remote: &Remote, local: &Local, root: &Path) -> Result<()> {

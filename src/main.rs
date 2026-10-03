@@ -88,6 +88,12 @@ enum Commands {
         #[arg(long, required = true)]
         hard: bool,
     },
+    /// Remove untracked files and directories from all local repositories
+    Clean {
+        /// Force removal; without it, list what would be removed
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
     /// Generate shell completion script
     #[clap(alias = "comp")]
     Completion {
@@ -240,6 +246,38 @@ fn main() -> Result<()> {
                     .reset_hard(dest.as_path())
                     .err()
                     .map(|e| e.to_string());
+
+                sender
+                    .send(progress::Update::Finish { slot, error })
+                    .unwrap();
+            });
+
+            drop(sender); // close the channel so the progress writer finishes
+            consumer.join().unwrap()?;
+        }
+        Commands::Clean { force } if !*force => status::clean_preview(&local, &cli.root)?,
+        Commands::Clean { .. } => {
+            let local_repos = local.repos(&cli.root)?;
+
+            let (sender, receiver) = unbounded::<progress::Update>();
+
+            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let consumer =
+                progress::create_writer(receiver, local_repos.len(), workers, "Cleaning");
+
+            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
+                let mut dest = cli.root.clone();
+                dest.push(r);
+
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label: "Cleaning",
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
+
+                let error = local.clean(dest.as_path()).err().map(|e| e.to_string());
 
                 sender
                     .send(progress::Update::Finish { slot, error })

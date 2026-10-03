@@ -24,9 +24,17 @@ Reset all local repos, only `--hard` mode implemented.
 
 Print git status for each repo with changes.
 
+## clean
+
+Remove untracked files from the working tree.
+
 ## help
 
 Print help information.
+
+# Install
+
+cargo install --git https://github.com/attiand/repo-set.git
 
 # Configuration file
 
