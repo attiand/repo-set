@@ -5,24 +5,41 @@ use std::{env::home_dir, fs};
 #[derive(Deserialize)]
 pub struct Remote {
     pub url: String,
+    #[serde(default)]
+    pub list: List,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct List {
+    #[serde(default)]
     pub cmd: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct Repo {
-    pub list: List,
     #[serde(default)]
     pub ignore: Vec<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct Clone {
+    #[serde(default)]
+    pub post: Post,
+}
+
+#[derive(Deserialize, Default)]
+pub struct Post {
+    #[serde(default)]
+    pub cmd: Vec<String>,
 }
 
 #[derive(Deserialize)]
 pub struct Config {
     pub remote: Remote,
+    #[serde(default)]
     pub repo: Repo,
+    #[serde(default)]
+    pub clone: Clone,
 }
 
 impl Config {

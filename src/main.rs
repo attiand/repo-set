@@ -123,7 +123,12 @@ fn main() -> Result<()> {
         &cli.ignore_repos
     };
 
-    let remote = remote::Remote::new(&config.repo.list.cmd, ignore, cli.debug > 0);
+    let remote = remote::Remote::new(
+        &config.remote.list.cmd,
+        &config.clone.post.cmd,
+        ignore,
+        cli.debug > 0,
+    );
     let local = local::Local::new(ignore, cli.debug > 0);
 
     if cli.debug > 0 {

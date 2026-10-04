@@ -6,14 +6,21 @@ use std::process::{Command, Stdio};
 /// Performs git remote operations, optionally logging debug output to stderr.
 pub struct Remote<'a> {
     list_cmd: &'a [String],
+    post_clone_cmd: &'a [String],
     ignore: &'a [String],
     debug: bool,
 }
 
 impl<'a> Remote<'a> {
-    pub fn new(list_cmd: &'a [String], ignore: &'a [String], debug: bool) -> Self {
+    pub fn new(
+        list_cmd: &'a [String],
+        post_clone_cmd: &'a [String],
+        ignore: &'a [String],
+        debug: bool,
+    ) -> Self {
         Self {
             list_cmd,
+            post_clone_cmd,
             ignore,
             debug,
         }
@@ -70,7 +77,48 @@ impl<'a> Remote<'a> {
         if self.debug {
             eprintln!("[debug] clone done {}", dst.display());
         }
+
+        self.run_post_clone(dst)?;
+
         Ok(repo)
+    }
+
+    /// Run the configured post-clone command inside the freshly cloned repo,
+    /// expanding `${repo}` (repository name) and `${dest}` (absolute repo path).
+    fn run_post_clone(&self, dst: &Path) -> anyhow::Result<()> {
+        if self.post_clone_cmd.is_empty() {
+            return Ok(());
+        }
+
+        let repo = dst
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let dest = std::fs::canonicalize(dst)?;
+        let dest = dest.to_string_lossy();
+
+        let args: Vec<String> = self
+            .post_clone_cmd
+            .iter()
+            .map(|a| a.replace("${repo}", &repo).replace("${dest}", &dest))
+            .collect();
+
+        if self.debug {
+            eprintln!("[debug] post-clone {:?} in {}", args, dst.display());
+        }
+
+        let program = &args[0];
+        let output = Command::new(program)
+            .args(&args[1..])
+            .current_dir(dst)
+            .stdin(Stdio::null())
+            .output()?;
+
+        if !output.status.success() {
+            return Err(anyhow!("post-clone command {} failed", program));
+        }
+
+        Ok(())
     }
 
     pub fn pull(&self, dst: &Path) -> anyhow::Result<()> {

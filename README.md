@@ -22,7 +22,7 @@ Reset all local repos, only `--hard` mode implemented.
 
 ## status
 
-Print git status for each repo with changes.
+Print git status for each repo with dirty workspaces.
 
 ## clean
 
@@ -40,14 +40,18 @@ cargo install --git https://github.com/attiand/repo-set.git
 
 # Configuration file
 
-repo-set reads a configuration file in the users home directory named `.repo-set.toml`
+`repo-set` reads a configuration file in the users home directory named `.repo-set.toml`
 
 To use with a gerrit server:
 
 ```toml
-remote.url = "my-gerrit:29418"
-
-[repo]
+[remote]
+url = "my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
-ignore =["non-important-repo"]
+
+repo.ignore =["non-important-repo"]
+
+# Optional command run in each repo after it is cloned.
+# ${repo} expands to the repository name, ${dest} to the repo's absolute path.
+clone.post.cmd = [ "git", "submodule", "update", "--init" ]
 ```
