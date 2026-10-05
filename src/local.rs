@@ -82,6 +82,96 @@ impl<'a> Local<'a> {
         Ok(())
     }
 
+    /// Whether there are tracked modifications or deletions that
+    /// `stage --update` would add to the index. Untracked files don't count.
+    pub fn has_stageable(&self, dst: &Path) -> anyhow::Result<bool> {
+        let repo = Repository::open(dst)?;
+
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(false);
+
+        let stageable = git2::Status::WT_MODIFIED
+            | git2::Status::WT_DELETED
+            | git2::Status::WT_TYPECHANGE
+            | git2::Status::WT_RENAMED;
+
+        for entry in repo.statuses(Some(&mut opts))?.iter() {
+            if entry.status().intersects(stageable) {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Stage modifications and deletions of already-tracked files, like
+    /// `git add --update`. Untracked files are left unstaged.
+    pub fn stage_update(&self, dst: &Path) -> anyhow::Result<()> {
+        if self.debug {
+            eprintln!("[debug] stage --update {}", dst.display());
+        }
+
+        let repo = Repository::open(dst)?;
+        let mut index = repo.index()?;
+        index.update_all(["*"].iter(), None)?;
+        index.write()?;
+
+        Ok(())
+    }
+
+    /// Whether the index holds staged changes relative to HEAD, i.e. there is
+    /// something for `commit` to record.
+    pub fn has_staged(&self, dst: &Path) -> anyhow::Result<bool> {
+        let repo = Repository::open(dst)?;
+
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(false);
+
+        let staged = git2::Status::INDEX_NEW
+            | git2::Status::INDEX_MODIFIED
+            | git2::Status::INDEX_DELETED
+            | git2::Status::INDEX_RENAMED
+            | git2::Status::INDEX_TYPECHANGE;
+
+        for entry in repo.statuses(Some(&mut opts))?.iter() {
+            if entry.status().intersects(staged) {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Commit the staged changes with `message`. Repos with nothing staged are
+    /// left untouched. Returns true when a commit was created.
+    pub fn commit(&self, dst: &Path, message: &str) -> anyhow::Result<bool> {
+        if self.debug {
+            eprintln!("[debug] commit {}", dst.display());
+        }
+
+        let repo = Repository::open(dst)?;
+        let mut index = repo.index()?;
+        let tree = repo.find_tree(index.write_tree()?)?;
+        let parent = repo.head()?.peel_to_commit()?;
+
+        // Nothing staged relative to HEAD, so there is nothing to commit.
+        if tree.id() == parent.tree_id() {
+            return Ok(false);
+        }
+
+        let signature = repo.signature()?;
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &[&parent],
+        )?;
+
+        Ok(true)
+    }
+
     /// List untracked files and directories that `clean` would remove. Ignored
     /// files are not included.
     pub fn clean_list(&self, dst: &Path) -> anyhow::Result<Vec<String>> {

@@ -81,6 +81,12 @@ enum Commands {
     /// Fetch all local repositories without updating the working tree
     #[clap(alias = "f")]
     Fetch,
+    /// Push local repositories that are ahead of their tracking branch
+    Push {
+        /// Refspec to push, for example HEAD:refs/heads/master
+        #[arg(value_name = "REFSPEC")]
+        refspec: String,
+    },
     /// List local repositories with an unclean working tree (git status --short)
     #[clap(alias = "s")]
     Status,
@@ -100,6 +106,19 @@ enum Commands {
         /// Force removal; without it, list what would be removed
         #[arg(long, default_value_t = false)]
         force: bool,
+    },
+    /// Stage changes in all local repositories
+    #[clap(aliases = ["add", "a"])]
+    Stage {
+        /// Stage modifications and deletions of tracked files
+        #[arg(short, long, required = true)]
+        update: bool,
+    },
+    /// Commit staged changes in all local repositories
+    Commit {
+        /// Commit message
+        #[arg(short, long, required = true, value_name = "MESSAGE")]
+        message: String,
     },
     /// Generate shell completion script
     #[clap(alias = "comp")]
@@ -263,6 +282,48 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
+        Commands::Push { refspec } => {
+            let local_repos = local.repos(&cli.root)?;
+
+            let (sender, receiver) = unbounded::<progress::Update>();
+
+            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let consumer =
+                progress::create_writer(receiver, local_repos.len(), workers, "Pushing");
+
+            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
+                let mut dest = cli.root.clone();
+                dest.push(r);
+
+                let unpushed = remote.has_unpushed(dest.as_path());
+                let skip = matches!(unpushed, Ok(false));
+                let label = if skip { "Skipping" } else { "Pushing" };
+
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label,
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
+
+                let error = match unpushed {
+                    Ok(false) => None,
+                    Ok(true) => remote
+                        .push(dest.as_path(), refspec)
+                        .err()
+                        .map(|e| e.to_string()),
+                    Err(e) => Some(e.to_string()),
+                };
+
+                sender
+                    .send(progress::Update::Finish { slot, error })
+                    .unwrap();
+            });
+
+            drop(sender); // close the channel so the progress writer finishes
+            consumer.join().unwrap()?;
+        }
         Commands::Status => status::dirty(&local, &cli.root)?,
         Commands::Reset { hard: _, commit } => {
             let local_repos = local.repos(&cli.root)?;
@@ -321,6 +382,90 @@ fn main() -> Result<()> {
                     .unwrap();
 
                 let error = local.clean(dest.as_path()).err().map(|e| e.to_string());
+
+                sender
+                    .send(progress::Update::Finish { slot, error })
+                    .unwrap();
+            });
+
+            drop(sender); // close the channel so the progress writer finishes
+            consumer.join().unwrap()?;
+        }
+        Commands::Stage { update: _ } => {
+            let local_repos = local.repos(&cli.root)?;
+
+            let (sender, receiver) = unbounded::<progress::Update>();
+
+            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let consumer =
+                progress::create_writer(receiver, local_repos.len(), workers, "Staging");
+
+            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
+                let mut dest = cli.root.clone();
+                dest.push(r);
+
+                let stageable = local.has_stageable(dest.as_path());
+                let skip = matches!(stageable, Ok(false));
+                let label = if skip { "Skipping" } else { "Staging" };
+
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label,
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
+
+                let error = match stageable {
+                    Ok(false) => None,
+                    Ok(true) => local
+                        .stage_update(dest.as_path())
+                        .err()
+                        .map(|e| e.to_string()),
+                    Err(e) => Some(e.to_string()),
+                };
+
+                sender
+                    .send(progress::Update::Finish { slot, error })
+                    .unwrap();
+            });
+
+            drop(sender); // close the channel so the progress writer finishes
+            consumer.join().unwrap()?;
+        }
+        Commands::Commit { message } => {
+            let local_repos = local.repos(&cli.root)?;
+
+            let (sender, receiver) = unbounded::<progress::Update>();
+
+            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let consumer =
+                progress::create_writer(receiver, local_repos.len(), workers, "Committing");
+
+            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
+                let mut dest = cli.root.clone();
+                dest.push(r);
+
+                let staged = local.has_staged(dest.as_path());
+                let skip = matches!(staged, Ok(false));
+                let label = if skip { "Skipping" } else { "Committing" };
+
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label,
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
+
+                let error = match staged {
+                    Ok(false) => None,
+                    Ok(true) => local
+                        .commit(dest.as_path(), message)
+                        .err()
+                        .map(|e| e.to_string()),
+                    Err(e) => Some(e.to_string()),
+                };
 
                 sender
                     .send(progress::Update::Finish { slot, error })

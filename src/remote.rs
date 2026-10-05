@@ -226,6 +226,49 @@ impl<'a> Remote<'a> {
 
         Ok((branch, fetch_commit))
     }
+
+    /// Whether the current branch has local commits ahead of its upstream
+    /// tracking branch. Branches with no upstream are considered not ahead.
+    pub fn has_unpushed(&self, dst: &Path) -> anyhow::Result<bool> {
+        let repo = Repository::open(dst)?;
+
+        let head = repo.head()?;
+        if !head.is_branch() {
+            return Ok(false);
+        }
+
+        let Some(local_oid) = head.target() else {
+            return Ok(false);
+        };
+
+        let branch = repo.find_branch(head.shorthand()?, git2::BranchType::Local)?;
+        let Ok(upstream) = branch.upstream() else {
+            return Ok(false);
+        };
+        let Some(upstream_oid) = upstream.get().target() else {
+            return Ok(false);
+        };
+
+        let (ahead, _behind) = repo.graph_ahead_behind(local_oid, upstream_oid)?;
+        Ok(ahead > 0)
+    }
+
+    /// Push `refspec` to `origin`.
+    pub fn push(&self, dst: &Path, refspec: &str) -> anyhow::Result<()> {
+        if self.debug {
+            eprintln!("[debug] push {} {}", refspec, dst.display());
+        }
+
+        let repo = Repository::open(dst)?;
+
+        let mut remote = repo.find_remote("origin")?;
+        let mut po = git2::PushOptions::new();
+        po.remote_callbacks(self.callbacks(dst.display().to_string()));
+
+        remote.push(&[refspec], Some(&mut po))?;
+
+        Ok(())
+    }
 }
 
 /// Attach sideband and transfer-progress callbacks that log to stderr.

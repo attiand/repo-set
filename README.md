@@ -12,6 +12,10 @@ Clone specified or all remote repos to the root directory.
 
 List remote, local or difference between remote and local.
 
+## fetch
+
+Fetch all local repos
+
 ## pull
 
 Pull all local repos
@@ -27,6 +31,18 @@ Print git status for each repo with dirty workspaces.
 ## clean
 
 Remove untracked files from the working tree.
+
+## Stage/Add
+
+Stage all local repos that do not have a clean workspace.
+
+## Commit
+
+Commit all local repos that has something in the index.
+
+## Push
+
+Push all local repos that is ahead of its tracking branch.
 
 ## help
 
