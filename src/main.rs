@@ -86,6 +86,11 @@ enum Commands {
         /// Refspec to push, for example HEAD:refs/heads/master
         #[arg(value_name = "REFSPEC")]
         refspec: String,
+
+        /// Push option sent to the remote, may be specified multiple times;
+        /// merged with the options from the configuration
+        #[arg(long = "push-option", num_args(1), value_name = "OPTION")]
+        push_option_cmd: Vec<String>,
     },
     /// List local repositories with an unclean working tree (git status --short)
     #[clap(alias = "s")]
@@ -148,6 +153,14 @@ fn main() -> Result<()> {
     } else {
         &cli.ignore_repos
     };
+
+    // Configured push options, formatted as key=value for git push.
+    let push_options: Vec<String> = config
+        .push
+        .options
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect();
 
     let remote = remote::Remote::new(
         &config.remote.list.cmd,
@@ -282,8 +295,15 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
-        Commands::Push { refspec } => {
+        Commands::Push {
+            refspec,
+            push_option_cmd,
+        } => {
             let local_repos = local.repos(&cli.root)?;
+
+            // Merge configured push options with those given on the command line.
+            let mut options = push_options.clone();
+            options.extend(push_option_cmd.iter().cloned());
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
@@ -310,7 +330,7 @@ fn main() -> Result<()> {
                 let error = match unpushed {
                     Ok(false) => None,
                     Ok(true) => remote
-                        .push(dest.as_path(), refspec)
+                        .push(dest.as_path(), refspec, &options)
                         .err()
                         .map(|e| e.to_string()),
                     Err(e) => Some(e.to_string()),

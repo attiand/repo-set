@@ -253,8 +253,8 @@ impl<'a> Remote<'a> {
         Ok(ahead > 0)
     }
 
-    /// Push `refspec` to `origin`.
-    pub fn push(&self, dst: &Path, refspec: &str) -> anyhow::Result<()> {
+    /// Push `refspec` to `origin`, sending `push_options` as git push options.
+    pub fn push(&self, dst: &Path, refspec: &str, push_options: &[String]) -> anyhow::Result<()> {
         if self.debug {
             eprintln!("[debug] push {} {}", refspec, dst.display());
         }
@@ -264,6 +264,11 @@ impl<'a> Remote<'a> {
         let mut remote = repo.find_remote("origin")?;
         let mut po = git2::PushOptions::new();
         po.remote_callbacks(self.callbacks(dst.display().to_string()));
+
+        let options: Vec<&str> = push_options.iter().map(String::as_str).collect();
+        if !options.is_empty() {
+            po.remote_push_options(&options);
+        }
 
         remote.push(&[refspec], Some(&mut po))?;
 

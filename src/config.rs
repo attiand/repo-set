@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::{env::home_dir, fs};
 
 #[derive(Deserialize)]
@@ -31,6 +32,13 @@ pub struct Post {
     pub cmd: Vec<String>,
 }
 
+#[derive(Deserialize, Default)]
+pub struct Push {
+    /// Arbitrary key/value pairs passed to `git push` as push options.
+    #[serde(default)]
+    pub options: BTreeMap<String, String>,
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     pub remote: Remote,
@@ -38,6 +46,8 @@ pub struct Config {
     pub repo: Repo,
     #[serde(default)]
     pub clone: Clone,
+    #[serde(default)]
+    pub push: Push,
 }
 
 impl Config {

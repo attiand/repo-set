@@ -73,4 +73,8 @@ ignore =["non-important-repo"]
 # Optional command run in each repo after it is cloned.
 # ${repo} expands to the repository name, ${dest} to the repo's absolute path.
 post.cmd = [ "cp", "myhook", "${dest}/.git/hooks/myhook" ]
+
+[push.options]
+# Optional git push options
+l="Code-Review+2"
 ```
