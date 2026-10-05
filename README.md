@@ -58,7 +58,29 @@ cargo install --git https://github.com/attiand/repo-set.git
 
 `repo-set` reads a configuration file in the users home directory named `.repo-set.toml`
 
-To use with a gerrit server:
+|Key                  |Mandatory | Description                                   |
+|---------------------|----------|-----------------------------------------------|
+|remote.url           |yes       |The git remote url                             |
+|remote.list.cmd      |yes       |A command to run to get a list of remote repos |
+|repo.ignore          |no        |An array of repos to ignore                    |
+|clone.post.cmd       |no        |A command to run after each clone              |
+|push.options         |no        |A table of git push options                    |
+
+For `clone.post.cmd` variable `${repo}` expands to the repository name and `${dest}` to the repo's absolute path.
+
+## Example
+
+Minimal config to use with a Gerrit server:
+
+```toml
+[remote]
+url = "my-gerrit:29418"
+list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
+```
+
+## Example
+
+Full configuration example:
 
 ```toml
 [remote]
@@ -66,15 +88,11 @@ url = "my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
 
 [repo]
-# Optional list of repos to ignore
-ignore =["non-important-repo"]
+ignore = ["repo1", "repo2"]
 
 [clone]
-# Optional command run in each repo after it is cloned.
-# ${repo} expands to the repository name, ${dest} to the repo's absolute path.
 post.cmd = [ "cp", "myhook", "${dest}/.git/hooks/myhook" ]
 
 [push.options]
-# Optional git push options
 l="Code-Review+2"
 ```
