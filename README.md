@@ -49,9 +49,12 @@ To use with a gerrit server:
 url = "my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
 
-repo.ignore =["non-important-repo"]
+[repo]
+# Optional list of repos to ignore
+ignore =["non-important-repo"]
 
+[clone]
 # Optional command run in each repo after it is cloned.
 # ${repo} expands to the repository name, ${dest} to the repo's absolute path.
-clone.post.cmd = [ "git", "submodule", "update", "--init" ]
+post.cmd = [ "cp", "myhook", "${dest}/.git/hooks/myhook" ]
 ```
