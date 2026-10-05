@@ -61,15 +61,23 @@ impl<'a> Local<'a> {
         Ok(res)
     }
 
-    /// Discard all local changes, resetting the working tree to HEAD.
-    pub fn reset_hard(&self, dst: &Path) -> anyhow::Result<()> {
+    /// Discard all local changes, resetting the working tree to `target`
+    /// (a revspec such as `origin/master`) or to HEAD when `target` is None.
+    pub fn reset_hard(&self, dst: &Path, target: Option<&str>) -> anyhow::Result<()> {
         if self.debug {
-            eprintln!("[debug] reset --hard {}", dst.display());
+            eprintln!(
+                "[debug] reset --hard {} {}",
+                target.unwrap_or("HEAD"),
+                dst.display()
+            );
         }
 
         let repo = Repository::open(dst)?;
-        let head = repo.head()?.peel_to_commit()?;
-        repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+        let object = match target {
+            Some(rev) => repo.revparse_single(rev)?.peel_to_commit()?,
+            None => repo.head()?.peel_to_commit()?,
+        };
+        repo.reset(object.as_object(), git2::ResetType::Hard, None)?;
 
         Ok(())
     }

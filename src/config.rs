@@ -5,13 +5,11 @@ use std::{env::home_dir, fs};
 #[derive(Deserialize)]
 pub struct Remote {
     pub url: String,
-    #[serde(default)]
     pub list: List,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 pub struct List {
-    #[serde(default)]
     pub cmd: Vec<String>,
 }
 
@@ -84,13 +82,24 @@ mod tests {
     }
 
     #[test]
-    fn only_url_is_mandatory() {
-        let config = parse(r#"remote.url = "host:29418""#);
+    fn remote_fields_are_mandatory() {
+        let config = parse(
+            r#"
+            remote.url = "host:29418"
+            remote.list.cmd = ["gerrit", "ls-projects"]
+            "#,
+        );
 
         assert_eq!(config.remote.url, "host:29418");
-        assert!(config.remote.list.cmd.is_empty());
+        assert_eq!(config.remote.list.cmd, ["gerrit", "ls-projects"]);
         assert!(config.repo.ignore.is_empty());
         assert!(config.clone.post.cmd.is_empty());
+    }
+
+    #[test]
+    fn missing_list_cmd_fails() {
+        let result = toml::from_str::<Config>(r#"remote.url = "host:29418""#);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -104,6 +113,7 @@ mod tests {
         let config = parse(
             r#"
             remote.url = "host:29418"
+            remote.list.cmd = ["gerrit"]
             unknown = "value"
             "#,
         );

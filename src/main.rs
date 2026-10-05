@@ -78,6 +78,9 @@ enum Commands {
     /// Pull all local repositories
     #[clap(alias = "p")]
     Pull,
+    /// Fetch all local repositories without updating the working tree
+    #[clap(alias = "f")]
+    Fetch,
     /// List local repositories with an unclean working tree (git status --short)
     #[clap(alias = "s")]
     Status,
@@ -87,6 +90,10 @@ enum Commands {
         /// Reset the working tree to HEAD, discarding all local changes
         #[arg(long, required = true)]
         hard: bool,
+
+        /// Commit or revspec to reset to (for example origin/master); defaults to HEAD
+        #[arg(value_name = "COMMIT")]
+        commit: Option<String>,
     },
     /// Remove untracked files and directories from all local repositories
     Clean {
@@ -225,8 +232,39 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
+        Commands::Fetch => {
+            let local_repos = local.repos(&cli.root)?;
+
+            let (sender, receiver) = unbounded::<progress::Update>();
+
+            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let consumer =
+                progress::create_writer(receiver, local_repos.len(), workers, "Fetching");
+
+            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
+                let mut dest = cli.root.clone();
+                dest.push(r);
+
+                sender
+                    .send(progress::Update::Start {
+                        slot,
+                        label: "Fetching",
+                        repo: r.to_string(),
+                    })
+                    .unwrap();
+
+                let error = remote.fetch(dest.as_path()).err().map(|e| e.to_string());
+
+                sender
+                    .send(progress::Update::Finish { slot, error })
+                    .unwrap();
+            });
+
+            drop(sender); // close the channel so the progress writer finishes
+            consumer.join().unwrap()?;
+        }
         Commands::Status => status::dirty(&local, &cli.root)?,
-        Commands::Reset { hard: _ } => {
+        Commands::Reset { hard: _, commit } => {
             let local_repos = local.repos(&cli.root)?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
@@ -248,7 +286,7 @@ fn main() -> Result<()> {
                     .unwrap();
 
                 let error = local
-                    .reset_hard(dest.as_path())
+                    .reset_hard(dest.as_path(), commit.as_deref())
                     .err()
                     .map(|e| e.to_string());
 

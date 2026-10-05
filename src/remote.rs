@@ -121,31 +121,23 @@ impl<'a> Remote<'a> {
         Ok(())
     }
 
+    pub fn fetch(&self, dst: &Path) -> anyhow::Result<()> {
+        if self.debug {
+            eprintln!("[debug] fetch {}", dst.display());
+        }
+
+        let repo = Repository::open(dst)?;
+        self.fetch_origin(&repo, dst)?;
+        Ok(())
+    }
+
     pub fn pull(&self, dst: &Path) -> anyhow::Result<()> {
         if self.debug {
             eprintln!("[debug] pull {}", dst.display());
         }
 
         let repo = Repository::open(dst)?;
-
-        let mut fo = git2::FetchOptions::new();
-        fo.remote_callbacks(self.callbacks(dst.display().to_string()));
-
-        // Fetch the current branch explicitly so we don't depend on a configured
-        // upstream tracking branch.
-        let branch = {
-            let head = repo.head()?;
-            if !head.is_branch() {
-                return Err(anyhow!("HEAD is detached, nothing to pull"));
-            }
-            head.shorthand()?.to_string()
-        };
-
-        let mut remote = repo.find_remote("origin")?;
-        remote.fetch(&[branch.as_str()], Some(&mut fo), None)?;
-
-        let fetch_head = repo.find_reference("FETCH_HEAD")?;
-        let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
+        let (branch, fetch_commit) = self.fetch_origin(&repo, dst)?;
         let (analysis, _) = repo.merge_analysis(&[&fetch_commit])?;
 
         if analysis.is_up_to_date() {
@@ -205,6 +197,34 @@ impl<'a> Remote<'a> {
         }
 
         Ok(())
+    }
+
+    /// Fetch the current branch from `origin`, returning the branch name and the
+    /// fetched commit. The branch is fetched explicitly so we don't depend on a
+    /// configured upstream tracking branch.
+    fn fetch_origin<'r>(
+        &self,
+        repo: &'r Repository,
+        dst: &Path,
+    ) -> anyhow::Result<(String, git2::AnnotatedCommit<'r>)> {
+        let mut fo = git2::FetchOptions::new();
+        fo.remote_callbacks(self.callbacks(dst.display().to_string()));
+
+        let branch = {
+            let head = repo.head()?;
+            if !head.is_branch() {
+                return Err(anyhow!("HEAD is detached, nothing to fetch"));
+            }
+            head.shorthand()?.to_string()
+        };
+
+        let mut remote = repo.find_remote("origin")?;
+        remote.fetch(&[branch.as_str()], Some(&mut fo), None)?;
+
+        let fetch_head = repo.find_reference("FETCH_HEAD")?;
+        let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
+
+        Ok((branch, fetch_commit))
     }
 }
 
