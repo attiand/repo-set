@@ -159,9 +159,41 @@ impl<'a> Remote<'a> {
             return Err(anyhow!("cannot fast-forward, merge required"));
         }
 
+        let target = repo.find_commit(fetch_commit.id())?;
+
+        // Dry-run checkout first (default strategy performs no updates) to detect
+        // files whose local changes would be overwritten, aborting like `git pull`.
+        let conflicts = std::cell::RefCell::new(Vec::new());
+        let probe_result = {
+            let mut probe = git2::build::CheckoutBuilder::new();
+            probe.notify_on(git2::CheckoutNotificationType::CONFLICT);
+            probe.notify(|_why, path, _baseline, _target, _workdir| {
+                if let Some(p) = path {
+                    conflicts
+                        .borrow_mut()
+                        .push(p.to_string_lossy().into_owned());
+                }
+                true
+            });
+            repo.checkout_tree(target.as_object(), Some(&mut probe))
+        };
+
+        let conflicts = conflicts.into_inner();
+        if !conflicts.is_empty() {
+            return Err(anyhow!(
+                "local changes to {} would be overwritten by pull, commit or stash them first",
+                conflicts.join(", ")
+            ));
+        }
+        probe_result?;
+
+        repo.checkout_tree(
+            target.as_object(),
+            Some(git2::build::CheckoutBuilder::default().safe()),
+        )?;
+
         let mut head = repo.head()?;
         head.set_target(fetch_commit.id(), "pull: fast-forward")?;
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))?;
 
         if self.debug {
             eprintln!(

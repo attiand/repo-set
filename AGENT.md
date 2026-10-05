@@ -13,10 +13,10 @@ can shell out to an external command (e.g. Gerrit `ls-projects`).
 
 ```sh
 cargo build            # debug build
-cargo build --release  # release build
 cargo run -- <args>    # run with CLI arguments
 cargo clippy           # lint
 cargo fmt              # format
+cargo test             # test
 ```
 
 There are currently no automated tests.
@@ -26,15 +26,16 @@ There are currently no automated tests.
 At runtime the CLI reads `~/.repo-set.toml`. Example:
 
 ```toml
-remote.url = "my-gerrit:29418"
+[remote]
+url = "my-gerrit:29418"
+list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
 
 [repo]
-list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit", "ls-projects" ]
-ignore = ["non-important-repo"]
-```
+ignore =["non-important-repo"]
 
-The `--ignore-repos` flag (repeatable, global) overrides `repo.ignore` from the
-config.
+[clone]
+post.cmd = [ "cp", "myhook", "${dest}/.git/hooks/myhook" ]
+```
 
 ## Source layout (`src/`)
 

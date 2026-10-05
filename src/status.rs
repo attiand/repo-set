@@ -16,7 +16,10 @@ pub fn remote(remote: &Remote) -> Result<()> {
 
 /// Print all local repositories.
 pub fn local(local: &Local, root: &Path) -> Result<()> {
-    local.repos(root)?.into_iter().for_each(|r| println!("{}", r));
+    local
+        .repos(root)?
+        .into_iter()
+        .for_each(|r| println!("{}", r));
     Ok(())
 }
 
@@ -39,9 +42,8 @@ pub fn dirty(local: &Local, root: &Path) -> Result<()> {
 /// Print, for every local repo, the untracked files and directories that
 /// `clean` would remove, grouped by repo name.
 pub fn clean_preview(local: &Local, root: &Path) -> Result<()> {
-
     if !local.repos(root)?.is_empty() {
-        println!("{}", "Specify --force to remove the following:");
+        println!("Specify --force to remove the following:");
     }
 
     for repo in local.repos(root)? {
@@ -72,7 +74,8 @@ pub fn superfluous(remote: &Remote, local: &Local, root: &Path) -> Result<()> {
 }
 
 /// Print the +/- difference between remote and local repositories.
-pub fn diff(remote: &Remote, local: &Local, root: &Path) -> Result<()> {    let remote_repos = remote.repo_list()?;
+pub fn diff(remote: &Remote, local: &Local, root: &Path) -> Result<()> {
+    let remote_repos = remote.repo_list()?;
     let local_repos = local.repos(root)?;
 
     let remote_set: HashSet<&String> = remote_repos.iter().collect();
@@ -110,7 +113,11 @@ pub fn status(remote: &Remote, local: &Local, root: &Path) -> Result<()> {
         .collect();
 
     let mut printed = false;
-    print_section("Remote repos not present locally:", &not_cloned, &mut printed);
+    print_section(
+        "Remote repos not present locally:",
+        &not_cloned,
+        &mut printed,
+    );
     print_section("Local repos with no remote:", &no_remote, &mut printed);
     print_section(
         "Superfluous directories (not git repos):",

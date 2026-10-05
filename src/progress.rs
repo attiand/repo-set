@@ -54,9 +54,9 @@ pub fn create_writer(
                             .map(|(_, repo)| repo.as_str())
                             .unwrap_or("");
                         failure = Some(format!(
-                            "    {} {}: {}",
+                            "    {} repo:{}: {}",
                             style("Failed").red().bold(),
-                            repo,
+                            style(repo).bold(),
                             err
                         ));
                     }

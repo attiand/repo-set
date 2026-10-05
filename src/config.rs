@@ -57,3 +57,58 @@ impl Config {
         toml::from_str(content.as_str()).map_err(anyhow::Error::msg)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    fn parse(toml: &str) -> Config {
+        toml::from_str(toml).expect("config should parse")
+    }
+
+    #[test]
+    fn parses_full_config() {
+        let config = parse(
+            r#"
+            remote.url = "my-gerrit:29418"
+            remote.list.cmd = ["ssh", "gerrit", "ls-projects"]
+            repo.ignore = ["a", "b"]
+            clone.post.cmd = ["git", "submodule", "update"]
+            "#,
+        );
+
+        assert_eq!(config.remote.url, "my-gerrit:29418");
+        assert_eq!(config.remote.list.cmd, ["ssh", "gerrit", "ls-projects"]);
+        assert_eq!(config.repo.ignore, ["a", "b"]);
+        assert_eq!(config.clone.post.cmd, ["git", "submodule", "update"]);
+    }
+
+    #[test]
+    fn only_url_is_mandatory() {
+        let config = parse(r#"remote.url = "host:29418""#);
+
+        assert_eq!(config.remote.url, "host:29418");
+        assert!(config.remote.list.cmd.is_empty());
+        assert!(config.repo.ignore.is_empty());
+        assert!(config.clone.post.cmd.is_empty());
+    }
+
+    #[test]
+    fn missing_url_fails() {
+        let result = toml::from_str::<Config>("repo.ignore = [\"a\"]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unknown_fields_are_ignored() {
+        let config = parse(
+            r#"
+            remote.url = "host:29418"
+            unknown = "value"
+            "#,
+        );
+
+        assert_eq!(config.remote.url, "host:29418");
+    }
+}
+
