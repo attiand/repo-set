@@ -22,27 +22,27 @@ Pull all local repos
 
 ## reset
 
-Reset all local repos, only `--hard` mode implemented.
+Reset all local repos, only `--hard` mode implemented for now.
 
 ## status
 
-Print git status for each repo with dirty workspaces.
+Print git status for repos with dirty workspaces.
 
 ## clean
 
-Remove untracked files from the working tree.
+List or remove untracked files from the working tree.
 
 ## stage/add
 
-Stage all local repos that do not have a clean workspace.
+Stage local repos that do not have a clean workspace.
 
 ## commit
 
-Commit all local repos that has something in the index.
+Commit local repositories with staged changes.
 
 ## push
 
-Push all local repos that is ahead of its tracking branch.
+Push local repos that is ahead of its tracking branch.
 
 ### Example
 
