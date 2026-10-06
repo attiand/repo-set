@@ -262,15 +262,40 @@ impl<'a> Remote<'a> {
         let repo = Repository::open(dst)?;
 
         let mut remote = repo.find_remote("origin")?;
-        let mut po = git2::PushOptions::new();
-        po.remote_callbacks(self.callbacks(dst.display().to_string()));
 
-        let options: Vec<&str> = push_options.iter().map(String::as_str).collect();
-        if !options.is_empty() {
-            po.remote_push_options(&options);
+        // libgit2 does not fail the push when the server rejects a ref, so we
+        // collect per-ref status here and turn it into an error afterwards.
+        let rejected = std::cell::RefCell::new(Vec::new());
+        {
+            let mut callbacks = RemoteCallbacks::new();
+            callbacks.credentials(|_url, username, _allowed_types| {
+                git2::Cred::ssh_key_from_agent(username.unwrap_or("git"))
+            });
+            callbacks.push_update_reference(|refname, status| {
+                if let Some(msg) = status {
+                    rejected.borrow_mut().push(format!("{}: {}", refname, msg));
+                }
+                Ok(())
+            });
+            if self.debug {
+                set_debug_callbacks(&mut callbacks, dst.display().to_string());
+            }
+
+            let mut po = git2::PushOptions::new();
+            po.remote_callbacks(callbacks);
+
+            let options: Vec<&str> = push_options.iter().map(String::as_str).collect();
+            if !options.is_empty() {
+                po.remote_push_options(&options);
+            }
+
+            remote.push(&[refspec], Some(&mut po))?;
         }
 
-        remote.push(&[refspec], Some(&mut po))?;
+        let rejected = rejected.into_inner();
+        if !rejected.is_empty() {
+            return Err(anyhow!("push rejected: {}", rejected.join(", ")));
+        }
 
         Ok(())
     }

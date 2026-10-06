@@ -4,35 +4,41 @@ use std::collections::BTreeMap;
 use std::{env::home_dir, fs};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Remote {
     pub url: String,
     pub list: List,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct List {
     pub cmd: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Repo {
     #[serde(default)]
     pub ignore: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Clone {
     #[serde(default)]
     pub post: Post,
 }
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Post {
     #[serde(default)]
     pub cmd: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Push {
     /// Arbitrary key/value pairs passed to `git push` as push options.
     #[serde(default)]
@@ -40,10 +46,11 @@ pub struct Push {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub remote: Remote,
     #[serde(default)]
-    pub repo: Repo,
+    pub repository: Repo,
     #[serde(default)]
     pub clone: Clone,
     #[serde(default)]
@@ -62,7 +69,7 @@ impl Config {
         }
 
         let content: String = fs::read_to_string(&home)?;
-        toml::from_str(content.as_str()).map_err(anyhow::Error::msg)
+        toml::from_str(content.as_str()).map_err(|e| anyhow!("{}: {}", home.display(), e))
     }
 }
 
@@ -80,14 +87,14 @@ mod tests {
             r#"
             remote.url = "my-gerrit:29418"
             remote.list.cmd = ["ssh", "gerrit", "ls-projects"]
-            repo.ignore = ["a", "b"]
+            repository.ignore = ["a", "b"]
             clone.post.cmd = ["git", "submodule", "update"]
             "#,
         );
 
         assert_eq!(config.remote.url, "my-gerrit:29418");
         assert_eq!(config.remote.list.cmd, ["ssh", "gerrit", "ls-projects"]);
-        assert_eq!(config.repo.ignore, ["a", "b"]);
+        assert_eq!(config.repository.ignore, ["a", "b"]);
         assert_eq!(config.clone.post.cmd, ["git", "submodule", "update"]);
     }
 
@@ -102,7 +109,7 @@ mod tests {
 
         assert_eq!(config.remote.url, "host:29418");
         assert_eq!(config.remote.list.cmd, ["gerrit", "ls-projects"]);
-        assert!(config.repo.ignore.is_empty());
+        assert!(config.repository.ignore.is_empty());
         assert!(config.clone.post.cmd.is_empty());
     }
 
@@ -114,13 +121,13 @@ mod tests {
 
     #[test]
     fn missing_url_fails() {
-        let result = toml::from_str::<Config>("repo.ignore = [\"a\"]");
+        let result = toml::from_str::<Config>("repository.ignore = [\"a\"]");
         assert!(result.is_err());
     }
 
     #[test]
-    fn unknown_fields_are_ignored() {
-        let config = parse(
+    fn unknown_fields_fail() {
+        let result = toml::from_str::<Config>(
             r#"
             remote.url = "host:29418"
             remote.list.cmd = ["gerrit"]
@@ -128,7 +135,7 @@ mod tests {
             "#,
         );
 
-        assert_eq!(config.remote.url, "host:29418");
+        assert!(result.is_err());
     }
 }
 

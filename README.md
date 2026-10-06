@@ -32,17 +32,25 @@ Print git status for each repo with dirty workspaces.
 
 Remove untracked files from the working tree.
 
-## Stage/Add
+## stage/add
 
 Stage all local repos that do not have a clean workspace.
 
-## Commit
+## commit
 
 Commit all local repos that has something in the index.
 
-## Push
+## push
 
 Push all local repos that is ahead of its tracking branch.
+
+### Example
+
+Push options:
+
+```bash
+repo-set push --push-option='m=#AS' HEAD:refs/for/master
+```
 
 ## help
 
@@ -62,7 +70,7 @@ cargo install --git https://github.com/attiand/repo-set.git
 |---------------------|----------|-----------------------------------------------|
 |remote.url           |yes       |The git remote url                             |
 |remote.list.cmd      |yes       |A command to run to get a list of remote repos |
-|repo.ignore          |no        |An array of repos to ignore                    |
+|repository.ignore    |no        |An array of repos to ignore                    |
 |clone.post.cmd       |no        |A command to run after each clone              |
 |push.options         |no        |A table of git push options                    |
 
@@ -87,12 +95,12 @@ Full configuration example:
 url = "my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
 
-[repo]
+[repository]
 ignore = ["repo1", "repo2"]
 
 [clone]
 post.cmd = [ "cp", "myhook", "${dest}/.git/hooks/myhook" ]
 
 [push.options]
-l="Code-Review+2"
+l = "Code-Review+2"
 ```

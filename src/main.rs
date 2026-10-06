@@ -149,7 +149,7 @@ fn main() -> Result<()> {
 
     // --ignore-repos overrides the ignore list from the configuration.
     let ignore = if cli.ignore_repos.is_empty() {
-        &config.repo.ignore
+        &config.repository.ignore
     } else {
         &cli.ignore_repos
     };
