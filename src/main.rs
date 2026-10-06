@@ -145,25 +145,21 @@ fn main() -> Result<()> {
     }
 
     let config = config::Config::new()?;
-    let base_url = cli.host.as_ref().unwrap_or(&config.remote.url);
+    let configured_url = config.remote_url()?;
+    let remote_list_cmd = config.remote_list_cmd()?;
+    let base_url = cli.host.as_deref().unwrap_or(&configured_url);
 
     // --ignore-repos overrides the ignore list from the configuration.
     let ignore = if cli.ignore_repos.is_empty() {
-        &config.repository.ignore
+        &config.repositories.ignore
     } else {
         &cli.ignore_repos
     };
 
-    // Configured push options, formatted as key=value for git push.
-    let push_options: Vec<String> = config
-        .push
-        .options
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect();
+    let push_options = config.push_options();
 
     let remote = remote::Remote::new(
-        &config.remote.list.cmd,
+        &remote_list_cmd,
         &config.clone.post.cmd,
         ignore,
         cli.debug > 0,

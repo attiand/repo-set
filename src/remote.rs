@@ -84,7 +84,7 @@ impl<'a> Remote<'a> {
     }
 
     /// Run the configured post-clone command inside the freshly cloned repo,
-    /// expanding `${repo}` (repository name) and `${dest}` (absolute repo path).
+    /// expanding `${repo}`, `${dest}`, and `${home}`.
     fn run_post_clone(&self, dst: &Path) -> anyhow::Result<()> {
         if self.post_clone_cmd.is_empty() {
             return Ok(());
@@ -95,13 +95,7 @@ impl<'a> Remote<'a> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let dest = std::fs::canonicalize(dst)?;
-        let dest = dest.to_string_lossy();
-
-        let args: Vec<String> = self
-            .post_clone_cmd
-            .iter()
-            .map(|a| a.replace("${repo}", &repo).replace("${dest}", &dest))
-            .collect();
+        let args = crate::config::expand_clone_post_cmd(&self.post_clone_cmd, &repo, &dest)?;
 
         if self.debug {
             eprintln!("[debug] post-clone {:?} in {}", args, dst.display());
@@ -137,63 +131,25 @@ impl<'a> Remote<'a> {
         }
 
         let repo = Repository::open(dst)?;
-        let (branch, fetch_commit) = self.fetch_origin(&repo, dst)?;
-        let (analysis, _) = repo.merge_analysis(&[&fetch_commit])?;
-
-        if analysis.is_up_to_date() {
-            if self.debug {
-                eprintln!("[debug] pull {}: already up to date", dst.display());
-            }
-            return Ok(());
+        let head = repo.head()?;
+        if !head.is_branch() {
+            return Err(anyhow!("HEAD is detached, nothing to pull"));
         }
+        let branch = head.shorthand()?.to_string();
 
-        if !analysis.is_fast_forward() {
-            return Err(anyhow!("cannot fast-forward, merge required"));
-        }
-
-        let target = repo.find_commit(fetch_commit.id())?;
-
-        // Dry-run checkout first (default strategy performs no updates) to detect
-        // files whose local changes would be overwritten, aborting like `git pull`.
-        let conflicts = std::cell::RefCell::new(Vec::new());
-        let probe_result = {
-            let mut probe = git2::build::CheckoutBuilder::new();
-            probe.notify_on(git2::CheckoutNotificationType::CONFLICT);
-            probe.notify(|_why, path, _baseline, _target, _workdir| {
-                if let Some(p) = path {
-                    conflicts
-                        .borrow_mut()
-                        .push(p.to_string_lossy().into_owned());
-                }
-                true
-            });
-            repo.checkout_tree(target.as_object(), Some(&mut probe))
-        };
-
-        let conflicts = conflicts.into_inner();
-        if !conflicts.is_empty() {
-            return Err(anyhow!(
-                "local changes to {} would be overwritten by pull, commit or stash them first",
-                conflicts.join(", ")
-            ));
-        }
-        probe_result?;
-
-        repo.checkout_tree(
-            target.as_object(),
-            Some(git2::build::CheckoutBuilder::default().safe()),
-        )?;
-
-        let mut head = repo.head()?;
-        head.set_target(fetch_commit.id(), "pull: fast-forward")?;
+        let output = Command::new("git")
+            .args(["pull", "--ff-only", "origin", branch.as_str()])
+            .current_dir(dst)
+            .output()?;
 
         if self.debug {
-            eprintln!(
-                "[debug] pull {}: fast-forwarded {} to {}",
-                dst.display(),
-                branch,
-                fetch_commit.id()
-            );
+            eprint!("{}", String::from_utf8_lossy(&output.stdout));
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        }
+
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("git pull failed: {}", detail.trim()));
         }
 
         Ok(())

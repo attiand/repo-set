@@ -64,17 +64,29 @@ cargo install --git https://github.com/attiand/repo-set.git
 
 # Configuration file
 
-`repo-set` reads a configuration file in the users home directory named `.repo-set.toml`
+`repo-set` reads a configuration file specified by the env var `REPO_SET_CONFIG`
+If not set reads `.repo-set.toml` in the users home directory.
 
-|Key                  |Mandatory | Description                                   |
+|Key                  |Mandatory |Description                                    |
 |---------------------|----------|-----------------------------------------------|
-|remote.url           |yes       |The git remote url                             |
+|remote.url           |yes       |The git remote URL                             |
 |remote.list.cmd      |yes       |A command to run to get a list of remote repos |
-|repository.ignore    |no        |An array of repos to ignore                    |
+|repositories.ignore  |no        |An array of repos to ignore                    |
 |clone.post.cmd       |no        |A command to run after each clone              |
 |push.options         |no        |A table of git push options                    |
 
-For `clone.post.cmd` variable `${repo}` expands to the repository name and `${dest}` to the repo's absolute path.
+
+## Variables
+
+There are limited variable expansion support:
+
+|Name  |Supported in key            |Description                      |
+|------|----------------------------|---------------------------------|
+|user  |remote.url, remote.list.cmd |The OS user name                 |
+|repo  |clone.post.cmd              |The repo name                    |
+|dest  |clone.post.cmd              |The abs path to the local repo   |
+|home  |clone.post.cmd              |The current user's home directory|
+
 
 ## Example
 
@@ -82,8 +94,8 @@ Minimal config to use with a Gerrit server:
 
 ```toml
 [remote]
-url = "my-gerrit:29418"
-list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
+url = "ssh://${user}@my-gerrit:29418"
+list.cmd = [ "ssh", "ssh://${user}@my-gerrit:29418", "gerrit" ,"ls-projects" ]
 ```
 
 ## Example
@@ -92,15 +104,17 @@ Full configuration example:
 
 ```toml
 [remote]
-url = "my-gerrit:29418"
-list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
+url = "ssh://${user}@my-gerrit:29418"
+list.cmd = [ "ssh", "ssh://${user}@my-gerrit:29418", "gerrit" ,"ls-projects" ]
 
-[repository]
+[repositories]
 ignore = ["repo1", "repo2"]
 
 [clone]
-post.cmd = [ "cp", "myhook", "${dest}/.git/hooks/myhook" ]
+# Add commit hook
+post.cmd = [ "cp", "${home}/.hooks/commit-msg", "${dest}/.git/hooks/commit-msg" ]
 
 [push.options]
+# Always vote +2
 l = "Code-Review+2"
 ```
