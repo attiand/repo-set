@@ -4,10 +4,10 @@ Guidance for AI coding agents working in this repository.
 
 ## Project
 
-`repo-set` is a Rust CLI that manages a set of git repositories under a root
-directory. A single command (clone, pull, reset, list, status) operates on every
-repository in the set. Git operations use `git2` (libgit2); repository listing
-can shell out to an external command (e.g. Gerrit `ls-projects`).
+`repo-set` is a Rust CLI application that manages a set of git repositories under a root
+directory. A single command (clone, pull, fetch, push, status, reset, clean, stage, commit)
+operates on every repository in the set. Git operations use `git2` (libgit2). CLI arguments
+are handled by Clap.
 
 ## Build & run
 
@@ -19,28 +19,15 @@ cargo fmt              # format
 cargo test             # test
 ```
 
-There are currently no automated tests.
-
 ## Configuration
 
-At runtime the CLI reads `~/.repo-set.toml`. Example:
-
-```toml
-[remote]
-url = "my-gerrit:29418"
-list.cmd = [ "ssh", "ssh://my-gerrit:29418", "gerrit" ,"ls-projects" ]
-
-[repo]
-ignore =["non-important-repo"]
-
-[clone]
-post.cmd = [ "cp", "myhook", "${dest}/.git/hooks/myhook" ]
-```
+At runtime the CLI reads a configuration file (`~/.repo-set.toml` by default). see [README.md](README.md)
+for a description and examples.
 
 ## Source layout (`src/`)
 
 - `main.rs` — CLI definition (clap derive) and command dispatch.
-- `config.rs` — loads and deserializes `~/.repo-set.toml`.
+- `config.rs` — loads and deserializes the configuration file.
 - `remote.rs` — `Remote`: methods that operates on the remote repo.
 - `local.rs` — `Local`: methods that operates on a local repo.
 - `status.rs` — `ls`/status output helpers.
