@@ -1,5 +1,6 @@
 mod config;
 mod local;
+mod parameters;
 mod pool;
 mod remote;
 mod status;
@@ -32,9 +33,9 @@ struct Cli {
     #[arg(long = "ignore-repo", num_args(1), value_name("REPO-NAME"))]
     ignore_repos: Vec<String>,
 
-    /// Number of worker threads to use, defaults to an I/O-friendly count if not specified.
-    #[arg(short, long, default_value_t = 0)]
-    threads: usize,
+    /// Number of worker threads; overrides configuration. Zero selects an I/O-friendly count.
+    #[arg(short, long)]
+    threads: Option<usize>,
 
     #[command(subcommand)]
     command: Commands,
@@ -145,31 +146,16 @@ fn main() -> Result<()> {
     }
 
     let config = config::Config::new()?;
-    let configured_url = config.remote_url()?;
-    let remote_list_cmd = config.remote_list_cmd()?;
-    let base_url = cli.host.as_deref().unwrap_or(&configured_url);
+    let parameters = parameters::Parameters::new(&config, &cli)?;
+    let ignore = &parameters.ignore_repos;
 
-    // --ignore-repos overrides the ignore list from the configuration.
-    let ignore = if cli.ignore_repos.is_empty() {
-        &config.repositories.ignore
-    } else {
-        &cli.ignore_repos
-    };
+    let remote = remote::Remote::new(&parameters);
+    let local = local::Local::new(&parameters);
 
-    let push_options = config.push_options();
-
-    let remote = remote::Remote::new(
-        &remote_list_cmd,
-        &config.clone.post.cmd,
-        ignore,
-        cli.debug > 0,
-    );
-    let local = local::Local::new(ignore, cli.debug > 0);
-
-    if cli.debug > 0 {
+    if parameters.debug {
         eprintln!(
             "[debug] using {} worker threads",
-            pool::worker_count(cli.threads, usize::MAX)
+            pool::worker_count(parameters.threads, usize::MAX)
         );
     }
 
@@ -187,14 +173,11 @@ fn main() -> Result<()> {
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, repos.len());
+            let workers = pool::worker_count(parameters.threads, repos.len());
             let consumer = progress::create_writer(receiver, repos.len(), workers, "Cloning");
 
-            pool::for_each_io(&repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
-                let skip = local.repo_exist(&cli.root, r);
+            pool::for_each_io(&repos, parameters.threads, |slot, r| {
+                let skip = local.repo_exist(r);
                 let label = if skip { "Skipping" } else { "Cloning" };
 
                 sender
@@ -208,11 +191,7 @@ fn main() -> Result<()> {
                 let error = if skip {
                     None
                 } else {
-                    let repo_url = format!("{}/{}", base_url, r);
-                    remote
-                        .clone(repo_url.as_ref(), dest.as_path())
-                        .err()
-                        .map(|e| e.to_string())
+                    remote.clone(r).err().map(|e| e.to_string())
                 };
 
                 sender
@@ -225,23 +204,20 @@ fn main() -> Result<()> {
         }
         Commands::List { mode } => match mode {
             Some(ListType::Remote) => status::remote(&remote)?,
-            Some(ListType::Local) => status::local(&local, &cli.root)?,
-            Some(ListType::Diff) => status::diff(&remote, &local, &cli.root)?,
-            Some(ListType::Superfluous) => status::superfluous(&remote, &local, &cli.root)?,
-            None => status::status(&remote, &local, &cli.root)?,
+            Some(ListType::Local) => status::local(&local)?,
+            Some(ListType::Diff) => status::diff(&remote, &local)?,
+            Some(ListType::Superfluous) => status::superfluous(&remote, &local)?,
+            None => status::status(&remote, &local)?,
         },
         Commands::Pull => {
-            let local_repos = local.repos(&cli.root)?;
+            let local_repos = local.repos()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let workers = pool::worker_count(parameters.threads, local_repos.len());
             let consumer = progress::create_writer(receiver, local_repos.len(), workers, "Pulling");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
+            pool::for_each_io(&local_repos, parameters.threads, |slot, r| {
                 sender
                     .send(progress::Update::Start {
                         slot,
@@ -250,7 +226,7 @@ fn main() -> Result<()> {
                     })
                     .unwrap();
 
-                let error = remote.pull(dest.as_path()).err().map(|e| e.to_string());
+                let error = remote.pull(r).err().map(|e| e.to_string());
 
                 sender
                     .send(progress::Update::Finish { slot, error })
@@ -261,18 +237,15 @@ fn main() -> Result<()> {
             consumer.join().unwrap()?;
         }
         Commands::Fetch => {
-            let local_repos = local.repos(&cli.root)?;
+            let local_repos = local.repos()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let workers = pool::worker_count(parameters.threads, local_repos.len());
             let consumer =
                 progress::create_writer(receiver, local_repos.len(), workers, "Fetching");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
+            pool::for_each_io(&local_repos, parameters.threads, |slot, r| {
                 sender
                     .send(progress::Update::Start {
                         slot,
@@ -281,7 +254,7 @@ fn main() -> Result<()> {
                     })
                     .unwrap();
 
-                let error = remote.fetch(dest.as_path()).err().map(|e| e.to_string());
+                let error = remote.fetch(r).err().map(|e| e.to_string());
 
                 sender
                     .send(progress::Update::Finish { slot, error })
@@ -291,27 +264,16 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
-        Commands::Push {
-            refspec,
-            push_option_cmd,
-        } => {
-            let local_repos = local.repos(&cli.root)?;
-
-            // Merge configured push options with those given on the command line.
-            let mut options = push_options.clone();
-            options.extend(push_option_cmd.iter().cloned());
+        Commands::Push { refspec, .. } => {
+            let local_repos = local.repos()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
-            let consumer =
-                progress::create_writer(receiver, local_repos.len(), workers, "Pushing");
+            let workers = pool::worker_count(parameters.threads, local_repos.len());
+            let consumer = progress::create_writer(receiver, local_repos.len(), workers, "Pushing");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
-                let unpushed = remote.has_unpushed(dest.as_path());
+            pool::for_each_io(&local_repos, parameters.threads, |slot, r| {
+                let unpushed = remote.has_unpushed(r);
                 let skip = matches!(unpushed, Ok(false));
                 let label = if skip { "Skipping" } else { "Pushing" };
 
@@ -325,10 +287,7 @@ fn main() -> Result<()> {
 
                 let error = match unpushed {
                     Ok(false) => None,
-                    Ok(true) => remote
-                        .push(dest.as_path(), refspec, &options)
-                        .err()
-                        .map(|e| e.to_string()),
+                    Ok(true) => remote.push(r, refspec).err().map(|e| e.to_string()),
                     Err(e) => Some(e.to_string()),
                 };
 
@@ -340,20 +299,17 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
-        Commands::Status => status::dirty(&local, &cli.root)?,
-        Commands::Reset { hard: _, commit } => {
-            let local_repos = local.repos(&cli.root)?;
+        Commands::Status => status::dirty(&local)?,
+        Commands::Reset { commit, .. } => {
+            let local_repos = local.repos()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let workers = pool::worker_count(parameters.threads, local_repos.len());
             let consumer =
                 progress::create_writer(receiver, local_repos.len(), workers, "Resetting");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
+            pool::for_each_io(&local_repos, parameters.threads, |slot, r| {
                 sender
                     .send(progress::Update::Start {
                         slot,
@@ -363,7 +319,7 @@ fn main() -> Result<()> {
                     .unwrap();
 
                 let error = local
-                    .reset_hard(dest.as_path(), commit.as_deref())
+                    .reset_hard(r, commit.as_deref())
                     .err()
                     .map(|e| e.to_string());
 
@@ -375,20 +331,17 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
-        Commands::Clean { force } if !*force => status::clean_preview(&local, &cli.root)?,
+        Commands::Clean { force } if !*force => status::clean_preview(&local)?,
         Commands::Clean { .. } => {
-            let local_repos = local.repos(&cli.root)?;
+            let local_repos = local.repos()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let workers = pool::worker_count(parameters.threads, local_repos.len());
             let consumer =
                 progress::create_writer(receiver, local_repos.len(), workers, "Cleaning");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
+            pool::for_each_io(&local_repos, parameters.threads, |slot, r| {
                 sender
                     .send(progress::Update::Start {
                         slot,
@@ -397,7 +350,7 @@ fn main() -> Result<()> {
                     })
                     .unwrap();
 
-                let error = local.clean(dest.as_path()).err().map(|e| e.to_string());
+                let error = local.clean(r).err().map(|e| e.to_string());
 
                 sender
                     .send(progress::Update::Finish { slot, error })
@@ -408,19 +361,15 @@ fn main() -> Result<()> {
             consumer.join().unwrap()?;
         }
         Commands::Stage { update: _ } => {
-            let local_repos = local.repos(&cli.root)?;
+            let local_repos = local.repos()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
-            let consumer =
-                progress::create_writer(receiver, local_repos.len(), workers, "Staging");
+            let workers = pool::worker_count(parameters.threads, local_repos.len());
+            let consumer = progress::create_writer(receiver, local_repos.len(), workers, "Staging");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
-                let stageable = local.has_stageable(dest.as_path());
+            pool::for_each_io(&local_repos, parameters.threads, |slot, r| {
+                let stageable = local.has_stageable(r);
                 let skip = matches!(stageable, Ok(false));
                 let label = if skip { "Skipping" } else { "Staging" };
 
@@ -434,10 +383,7 @@ fn main() -> Result<()> {
 
                 let error = match stageable {
                     Ok(false) => None,
-                    Ok(true) => local
-                        .stage_update(dest.as_path())
-                        .err()
-                        .map(|e| e.to_string()),
+                    Ok(true) => local.stage_update(r).err().map(|e| e.to_string()),
                     Err(e) => Some(e.to_string()),
                 };
 
@@ -450,19 +396,16 @@ fn main() -> Result<()> {
             consumer.join().unwrap()?;
         }
         Commands::Commit { message } => {
-            let local_repos = local.repos(&cli.root)?;
+            let local_repos = local.repos()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
+            let workers = pool::worker_count(parameters.threads, local_repos.len());
             let consumer =
                 progress::create_writer(receiver, local_repos.len(), workers, "Committing");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
-                let mut dest = cli.root.clone();
-                dest.push(r);
-
-                let staged = local.has_staged(dest.as_path());
+            pool::for_each_io(&local_repos, parameters.threads, |slot, r| {
+                let staged = local.has_staged(r);
                 let skip = matches!(staged, Ok(false));
                 let label = if skip { "Skipping" } else { "Committing" };
 
@@ -476,10 +419,7 @@ fn main() -> Result<()> {
 
                 let error = match staged {
                     Ok(false) => None,
-                    Ok(true) => local
-                        .commit(dest.as_path(), message)
-                        .err()
-                        .map(|e| e.to_string()),
+                    Ok(true) => local.commit(r, message).err().map(|e| e.to_string()),
                     Err(e) => Some(e.to_string()),
                 };
 

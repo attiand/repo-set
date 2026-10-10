@@ -67,14 +67,14 @@ cargo install --git https://github.com/attiand/repo-set.git
 `repo-set` reads a configuration file specified by the env var `REPO_SET_CONFIG`
 If not set reads `.repo-set.toml` in the users home directory.
 
-|Key                  |Mandatory |Description                                    |
-|---------------------|----------|-----------------------------------------------|
-|remote.url           |yes       |The git remote URL                             |
-|remote.list.cmd      |yes       |A command to run to get a list of remote repos |
-|repositories.ignore  |no        |An array of repos to ignore                    |
-|clone.post.cmd       |no        |A command to run after each clone              |
-|push.options         |no        |A table of git push options                    |
-
+|Key                  |Mandatory |Description                                     |
+|---------------------|----------|------------------------------------------------|
+|remote.url           |yes       |The git remote URL                              |
+|remote.list.cmd      |yes       |A command to run to get a list of remote repos  |
+|repositories.ignore  |no        |An array of repos to ignore                     |
+|clone.post.cmd       |no        |A command to run after each clone               |
+|push.options         |no        |A table of git push options                     |
+|threads              |no        |Default worker count; 0 selects automatic sizing|
 
 ## Variables
 
@@ -103,6 +103,8 @@ list.cmd = [ "ssh", "ssh://${user}@my-gerrit:29418", "gerrit" ,"ls-projects" ]
 Full configuration example:
 
 ```toml
+threads = 8
+
 [remote]
 url = "ssh://${user}@my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://${user}@my-gerrit:29418", "gerrit" ,"ls-projects" ]

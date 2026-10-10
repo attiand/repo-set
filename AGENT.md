@@ -21,13 +21,13 @@ cargo test             # test
 
 ## Configuration
 
-At runtime the CLI reads a configuration file (`~/.repo-set.toml` by default). see [README.md](README.md)
-for a description and examples.
+At runtime the CLI reads a configuration file (`~/.repo-set.toml` by default). see [README.md](README.md) for a description and examples.
 
 ## Source layout (`src/`)
 
 - `main.rs` — CLI definition (clap derive) and command dispatch.
 - `config.rs` — loads and deserializes the configuration file.
+- `parameters.rs` - Holds application parameters, either from config or CLI.
 - `remote.rs` — `Remote`: methods that operates on the remote repo.
 - `local.rs` — `Local`: methods that operates on a local repo.
 - `status.rs` — `ls`/status output helpers.
@@ -36,8 +36,6 @@ for a description and examples.
 
 ## Conventions
 
-- `Remote` and `Local` take `&[String]` slices (e.g. the ignore list), not the
-  `Config` struct, so they stay decoupled from configuration loading.
 - Errors propagate with `anyhow::Result`.
 - Keep comments to a single line that states what the code cannot show on its
   own; do not restate what the next line does.

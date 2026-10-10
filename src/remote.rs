@@ -1,3 +1,4 @@
+use crate::parameters::Parameters;
 use anyhow::anyhow;
 use git2::{RemoteCallbacks, Repository};
 use std::path::Path;
@@ -5,30 +6,17 @@ use std::process::{Command, Stdio};
 
 /// Performs git remote operations, optionally logging debug output to stderr.
 pub struct Remote<'a> {
-    list_cmd: &'a [String],
-    post_clone_cmd: &'a [String],
-    ignore: &'a [String],
-    debug: bool,
+    parameters: &'a Parameters,
 }
 
 impl<'a> Remote<'a> {
-    pub fn new(
-        list_cmd: &'a [String],
-        post_clone_cmd: &'a [String],
-        ignore: &'a [String],
-        debug: bool,
-    ) -> Self {
-        Self {
-            list_cmd,
-            post_clone_cmd,
-            ignore,
-            debug,
-        }
+    pub fn new(parameters: &'a Parameters) -> Self {
+        Self { parameters }
     }
 
     /// List remote repositories, excluding any configured to be ignored.
     pub fn repo_list(&self) -> anyhow::Result<Vec<String>> {
-        let cmd = self.list_cmd;
+        let cmd = &self.parameters.remote_list_cmd;
         let Some(program) = cmd.first() else {
             return Ok(Vec::new());
         };
@@ -45,7 +33,7 @@ impl<'a> Remote<'a> {
         let out = String::from_utf8(output.stdout)?;
         Ok(out
             .split_whitespace()
-            .filter(|r| !self.ignore.iter().any(|i| i == r))
+            .filter(|r| !self.parameters.ignore_repos.iter().any(|i| i == r))
             .map(String::from)
             .collect())
     }
@@ -56,52 +44,48 @@ impl<'a> Remote<'a> {
         callbacks.credentials(|_url, username, _allowed_types| {
             git2::Cred::ssh_key_from_agent(username.unwrap_or("git"))
         });
-        if self.debug {
+        if self.parameters.debug {
             set_debug_callbacks(&mut callbacks, label);
         }
         callbacks
     }
 
-    pub fn clone(&self, repo_url: &str, dst: &Path) -> anyhow::Result<Repository> {
-        if self.debug {
-            eprintln!("[debug] clone {} -> {}", repo_url, dst.display());
+    pub fn clone(&self, repo_name: &str) -> anyhow::Result<Repository> {
+        let remote_repo_url = self.parameters.remote_repo_url(repo_name);
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
+            eprintln!("[debug] clone {} -> {}", remote_repo_url, dst.display());
         }
 
         let mut fo = git2::FetchOptions::new();
-        fo.remote_callbacks(self.callbacks(repo_url.to_string()));
+        fo.remote_callbacks(self.callbacks(remote_repo_url.clone()));
 
         let mut builder = git2::build::RepoBuilder::new();
         builder.fetch_options(fo);
 
-        let repo = builder.clone(repo_url, dst).map_err(anyhow::Error::msg)?;
-        if self.debug {
+        let repo = builder
+            .clone(&remote_repo_url, &dst)
+            .map_err(anyhow::Error::msg)?;
+        if self.parameters.debug {
             eprintln!("[debug] clone done {}", dst.display());
         }
 
-        self.run_post_clone(dst)?;
+        self.run_post_clone(&dst)?;
 
         Ok(repo)
     }
 
-    /// Run the configured post-clone command inside the freshly cloned repo,
-    /// expanding `${repo}`, `${dest}`, and `${home}`.
+    /// Run the resolved post-clone command inside the freshly cloned repo.
     fn run_post_clone(&self, dst: &Path) -> anyhow::Result<()> {
-        if self.post_clone_cmd.is_empty() {
+        let args = self.parameters.clone_post_cmd(dst)?;
+        let Some(program) = args.first() else {
             return Ok(());
-        }
+        };
 
-        let repo = dst
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let dest = std::fs::canonicalize(dst)?;
-        let args = crate::config::expand_clone_post_cmd(&self.post_clone_cmd, &repo, &dest)?;
-
-        if self.debug {
+        if self.parameters.debug {
             eprintln!("[debug] post-clone {:?} in {}", args, dst.display());
         }
 
-        let program = &args[0];
         let output = Command::new(program)
             .args(&args[1..])
             .current_dir(dst)
@@ -115,22 +99,24 @@ impl<'a> Remote<'a> {
         Ok(())
     }
 
-    pub fn fetch(&self, dst: &Path) -> anyhow::Result<()> {
-        if self.debug {
+    pub fn fetch(&self, repo_name: &str) -> anyhow::Result<()> {
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
             eprintln!("[debug] fetch {}", dst.display());
         }
 
-        let repo = Repository::open(dst)?;
-        self.fetch_origin(&repo, dst)?;
+        let repo = Repository::open(&dst)?;
+        self.fetch_origin(&repo, &dst)?;
         Ok(())
     }
 
-    pub fn pull(&self, dst: &Path) -> anyhow::Result<()> {
-        if self.debug {
+    pub fn pull(&self, repo_name: &str) -> anyhow::Result<()> {
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
             eprintln!("[debug] pull {}", dst.display());
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = Repository::open(&dst)?;
         let head = repo.head()?;
         if !head.is_branch() {
             return Err(anyhow!("HEAD is detached, nothing to pull"));
@@ -139,10 +125,10 @@ impl<'a> Remote<'a> {
 
         let output = Command::new("git")
             .args(["pull", "--ff-only", "origin", branch.as_str()])
-            .current_dir(dst)
+            .current_dir(&dst)
             .output()?;
 
-        if self.debug {
+        if self.parameters.debug {
             eprint!("{}", String::from_utf8_lossy(&output.stdout));
             eprint!("{}", String::from_utf8_lossy(&output.stderr));
         }
@@ -185,8 +171,8 @@ impl<'a> Remote<'a> {
 
     /// Whether the current branch has local commits ahead of its upstream
     /// tracking branch. Branches with no upstream are considered not ahead.
-    pub fn has_unpushed(&self, dst: &Path) -> anyhow::Result<bool> {
-        let repo = Repository::open(dst)?;
+    pub fn has_unpushed(&self, repo_name: &str) -> anyhow::Result<bool> {
+        let repo = Repository::open(self.parameters.local_repo_path(repo_name))?;
 
         let head = repo.head()?;
         if !head.is_branch() {
@@ -209,13 +195,14 @@ impl<'a> Remote<'a> {
         Ok(ahead > 0)
     }
 
-    /// Push `refspec` to `origin`, sending `push_options` as git push options.
-    pub fn push(&self, dst: &Path, refspec: &str, push_options: &[String]) -> anyhow::Result<()> {
-        if self.debug {
+    /// Push the supplied refspec to origin with the configured push options.
+    pub fn push(&self, repo_name: &str, refspec: &str) -> anyhow::Result<()> {
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
             eprintln!("[debug] push {} {}", refspec, dst.display());
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = Repository::open(&dst)?;
 
         let mut remote = repo.find_remote("origin")?;
 
@@ -233,14 +220,19 @@ impl<'a> Remote<'a> {
                 }
                 Ok(())
             });
-            if self.debug {
+            if self.parameters.debug {
                 set_debug_callbacks(&mut callbacks, dst.display().to_string());
             }
 
             let mut po = git2::PushOptions::new();
             po.remote_callbacks(callbacks);
 
-            let options: Vec<&str> = push_options.iter().map(String::as_str).collect();
+            let options: Vec<&str> = self
+                .parameters
+                .push_options
+                .iter()
+                .map(String::as_str)
+                .collect();
             if !options.is_empty() {
                 po.remote_push_options(&options);
             }

@@ -1,6 +1,6 @@
+use crate::parameters::Parameters;
 use git2::Repository;
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
 /// A single `git status --short` entry: the two-character status code and path.
@@ -11,31 +11,30 @@ pub struct FileStatus {
 
 /// Operates on the local repo set, optionally logging debug output to stderr.
 pub struct Local<'a> {
-    ignore: &'a [String],
-    debug: bool,
+    parameters: &'a Parameters,
 }
 
 impl<'a> Local<'a> {
-    pub fn new(ignore: &'a [String], debug: bool) -> Self {
-        Self { ignore, debug }
+    pub fn new(parameters: &'a Parameters) -> Self {
+        Self { parameters }
     }
 
-    pub fn repo_exist(&self, root: &Path, repo: &str) -> bool {
-        root.join(repo).exists()
+    pub fn repo_exist(&self, repo: &str) -> bool {
+        self.parameters.local_repo_path(repo).exists()
     }
 
     /// List local repository directories, excluding any configured to be ignored.
-    pub fn repos(&self, root: &Path) -> anyhow::Result<Vec<String>> {
+    pub fn repos(&self) -> anyhow::Result<Vec<String>> {
         let mut res = Vec::new();
 
-        for e in fs::read_dir(root)? {
+        for e in fs::read_dir(&self.parameters.root)? {
             let p = e?.path();
 
             if p.join(".git").is_dir()
                 && let Some(f) = p.file_name()
             {
                 let name = f.to_str().expect("Can't convert file name");
-                if !self.ignore.iter().any(|i| i == name) {
+                if !self.parameters.ignore_repos.iter().any(|i| i == name) {
                     res.push(name.to_string());
                 }
             }
@@ -44,11 +43,11 @@ impl<'a> Local<'a> {
         Ok(res)
     }
 
-    /// List directories under `root` that are not git repositories.
-    pub fn non_repos(&self, root: &Path) -> anyhow::Result<Vec<String>> {
+    /// List directories under the configured root that are not git repositories.
+    pub fn non_repos(&self) -> anyhow::Result<Vec<String>> {
         let mut res = Vec::new();
 
-        for e in fs::read_dir(root)? {
+        for e in fs::read_dir(&self.parameters.root)? {
             let p = e?.path();
 
             if p.is_dir()
@@ -62,10 +61,10 @@ impl<'a> Local<'a> {
         Ok(res)
     }
 
-    /// Discard all local changes, resetting the working tree to `target`
-    /// (a revspec such as `origin/master`) or to HEAD when `target` is None.
-    pub fn reset_hard(&self, dst: &Path, target: Option<&str>) -> anyhow::Result<()> {
-        if self.debug {
+    /// Discard local changes, resetting to the supplied target or HEAD.
+    pub fn reset_hard(&self, repo_name: &str, target: Option<&str>) -> anyhow::Result<()> {
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
             eprintln!(
                 "[debug] reset --hard {} {}",
                 target.unwrap_or("HEAD"),
@@ -73,7 +72,7 @@ impl<'a> Local<'a> {
             );
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = Repository::open(&dst)?;
         let object = match target {
             Some(rev) => repo.revparse_single(rev)?.peel_to_commit()?,
             None => repo.head()?.peel_to_commit()?,
@@ -85,8 +84,8 @@ impl<'a> Local<'a> {
 
     /// Whether there are tracked modifications or deletions that
     /// `stage --update` would add to the index. Untracked files don't count.
-    pub fn has_stageable(&self, dst: &Path) -> anyhow::Result<bool> {
-        let repo = Repository::open(dst)?;
+    pub fn has_stageable(&self, repo_name: &str) -> anyhow::Result<bool> {
+        let repo = Repository::open(self.parameters.local_repo_path(repo_name))?;
 
         let mut opts = git2::StatusOptions::new();
         opts.include_untracked(false);
@@ -107,12 +106,13 @@ impl<'a> Local<'a> {
 
     /// Stage modifications and deletions of already-tracked files, like
     /// `git add --update`. Untracked files are left unstaged.
-    pub fn stage_update(&self, dst: &Path) -> anyhow::Result<()> {
-        if self.debug {
+    pub fn stage_update(&self, repo_name: &str) -> anyhow::Result<()> {
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
             eprintln!("[debug] stage --update {}", dst.display());
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = Repository::open(&dst)?;
         let mut index = repo.index()?;
         index.update_all(["*"].iter(), None)?;
         index.write()?;
@@ -122,8 +122,8 @@ impl<'a> Local<'a> {
 
     /// Whether the index holds staged changes relative to HEAD, i.e. there is
     /// something for `commit` to record.
-    pub fn has_staged(&self, dst: &Path) -> anyhow::Result<bool> {
-        let repo = Repository::open(dst)?;
+    pub fn has_staged(&self, repo_name: &str) -> anyhow::Result<bool> {
+        let repo = Repository::open(self.parameters.local_repo_path(repo_name))?;
 
         let mut opts = git2::StatusOptions::new();
         opts.include_untracked(false);
@@ -143,14 +143,15 @@ impl<'a> Local<'a> {
         Ok(false)
     }
 
-    /// Commit the staged changes with `message`. Repos with nothing staged are
+    /// Commit staged changes with the supplied message. Repos with nothing staged are
     /// left untouched. Returns true when a commit was created.
-    pub fn commit(&self, dst: &Path, message: &str) -> anyhow::Result<bool> {
-        if self.debug {
+    pub fn commit(&self, repo_name: &str, message: &str) -> anyhow::Result<bool> {
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
             eprintln!("[debug] commit {}", dst.display());
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = Repository::open(&dst)?;
         let mut index = repo.index()?;
         let tree = repo.find_tree(index.write_tree()?)?;
         let parent = repo.head()?.peel_to_commit()?;
@@ -179,8 +180,8 @@ impl<'a> Local<'a> {
 
     /// List untracked files and directories that `clean` would remove. Ignored
     /// files are not included.
-    pub fn clean_list(&self, dst: &Path) -> anyhow::Result<Vec<String>> {
-        let repo = Repository::open(dst)?;
+    pub fn clean_list(&self, repo_name: &str) -> anyhow::Result<Vec<String>> {
+        let repo = Repository::open(self.parameters.local_repo_path(repo_name))?;
 
         let mut opts = git2::StatusOptions::new();
         opts.include_untracked(true).include_ignored(false);
@@ -199,12 +200,13 @@ impl<'a> Local<'a> {
 
     /// Remove untracked files and directories, like `git clean -fd`. Ignored
     /// files are left in place.
-    pub fn clean(&self, dst: &Path) -> anyhow::Result<()> {
-        if self.debug {
+    pub fn clean(&self, repo_name: &str) -> anyhow::Result<()> {
+        let dst = self.parameters.local_repo_path(repo_name);
+        if self.parameters.debug {
             eprintln!("[debug] clean {}", dst.display());
         }
 
-        for rel in self.clean_list(dst)? {
+        for rel in self.clean_list(repo_name)? {
             let full = dst.join(&rel);
             if full.is_dir() {
                 fs::remove_dir_all(&full)?;
@@ -218,8 +220,8 @@ impl<'a> Local<'a> {
 
     /// Return the working tree status as `git status --short` entries. An empty
     /// vector means the working tree is clean.
-    pub fn status_short(&self, dst: &Path) -> anyhow::Result<Vec<FileStatus>> {
-        let repo = Repository::open(dst)?;
+    pub fn status_short(&self, repo_name: &str) -> anyhow::Result<Vec<FileStatus>> {
+        let repo = Repository::open(self.parameters.local_repo_path(repo_name))?;
 
         let mut opts = git2::StatusOptions::new();
         opts.include_untracked(true).recurse_untracked_dirs(true);
@@ -305,4 +307,118 @@ fn short_flags(s: git2::Status) -> (char, char) {
     };
 
     (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Local;
+    use crate::config::Config;
+    use crate::parameters::Parameters;
+    use crate::remote::Remote;
+    use crate::{Cli, Commands};
+    use git2::Repository;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestRoot(PathBuf);
+
+    impl TestRoot {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path =
+                std::env::temp_dir().join(format!("repo-set-{}-{}", std::process::id(), unique));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn operations_resolve_repository_names_and_command_settings() {
+        let root = TestRoot::new();
+        let config: Config = toml::from_str(
+            r#"
+            remote.url = "host:29418"
+            remote.list.cmd = []
+            repositories.ignore = ["ignored"]
+            "#,
+        )
+        .unwrap();
+        let cli = Cli {
+            root: root.0.clone(),
+            host: None,
+            debug: 0,
+            ignore_repos: Vec::new(),
+            threads: None,
+            command: Commands::Pull,
+        };
+        let parameters = Parameters::new(&config, &cli).unwrap();
+        let local = Local::new(&parameters);
+        let local_repo_path = root.0.join("managed");
+        let repo = Repository::init(&local_repo_path).unwrap();
+        Repository::init(root.0.join("ignored")).unwrap();
+        fs::create_dir(root.0.join("extra")).unwrap();
+        let mut git_config = repo.config().unwrap();
+        git_config.set_str("user.name", "Test User").unwrap();
+        git_config
+            .set_str("user.email", "test@example.com")
+            .unwrap();
+        fs::write(local_repo_path.join("tracked"), "initial\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("tracked")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = repo.signature().unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "Initial", &tree, &[])
+            .unwrap();
+
+        assert!(local.repo_exist("managed"));
+        assert!(!local.repo_exist("missing"));
+        assert_eq!(local.repos().unwrap(), ["managed"]);
+        assert_eq!(local.non_repos().unwrap(), ["extra"]);
+        assert!(local.status_short("managed").unwrap().is_empty());
+        assert!(!Remote::new(&parameters).has_unpushed("managed").unwrap());
+
+        fs::write(local_repo_path.join("tracked"), "changed\n").unwrap();
+        assert!(local.has_stageable("managed").unwrap());
+        local.stage_update("managed").unwrap();
+        assert!(local.has_staged("managed").unwrap());
+        assert!(local.commit("managed", "Explicit message").unwrap());
+        assert_eq!(
+            repo.head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .message()
+                .unwrap(),
+            "Explicit message"
+        );
+        assert!(!local.commit("managed", "Explicit message").unwrap());
+
+        fs::write(local_repo_path.join("tracked"), "discard\n").unwrap();
+        local.reset_hard("managed", None).unwrap();
+        assert_eq!(
+            fs::read_to_string(local_repo_path.join("tracked")).unwrap(),
+            "changed\n"
+        );
+        fs::write(local_repo_path.join("untracked"), "remove\n").unwrap();
+        assert_eq!(local.clean_list("managed").unwrap(), ["untracked"]);
+        local.clean("managed").unwrap();
+        assert!(local.status_short("managed").unwrap().is_empty());
+
+        local.reset_hard("managed", Some("HEAD~1")).unwrap();
+        assert_eq!(
+            fs::read_to_string(local_repo_path.join("tracked")).unwrap(),
+            "initial\n"
+        );
+    }
 }
