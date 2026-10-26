@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use serde::de::{DeserializeOwned, IgnoredAny};
 use std::path::{Path, PathBuf};
 use std::{env::home_dir, fs};
 
@@ -38,27 +38,42 @@ pub struct Post {
     pub cmd: Vec<String>,
 }
 
-#[derive(Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct Push {
-    /// Arbitrary key/value pairs passed to `git push` as push options.
-    #[serde(default)]
-    pub options: BTreeMap<String, String>,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+struct FileConfig {
     pub remote: Remote,
     #[serde(default)]
     pub repositories: Repo,
     #[serde(default)]
     pub clone: Clone,
     #[serde(default)]
-    pub push: Push,
+    #[serde(rename = "push")]
+    _push: Option<IgnoredAny>,
+}
+
+#[derive(Deserialize)]
+#[serde(from = "FileConfig")]
+pub struct Config {
+    pub remote: Remote,
+    pub repositories: Repo,
+    pub clone: Clone,
+}
+
+impl From<FileConfig> for Config {
+    fn from(config: FileConfig) -> Self {
+        Self {
+            remote: config.remote,
+            repositories: config.repositories,
+            clone: config.clone,
+        }
+    }
 }
 
 impl Config {
+    pub fn new(root: &Path) -> anyhow::Result<Self> {
+        load_from_root(root)
+    }
+
     pub fn remote_url(&self) -> anyhow::Result<String> {
         expand_user(&self.remote.url)
     }
@@ -71,49 +86,42 @@ impl Config {
             .map(|arg| expand_user(arg))
             .collect()
     }
-
-    pub fn push_options(&self) -> Vec<String> {
-        self.push
-            .options
-            .iter()
-            .map(|(key, value)| format!("{}={}", key, value))
-            .collect()
-    }
-
-    pub fn new() -> anyhow::Result<Self> {
-        let path = resolve_config_path(
-            std::env::var_os("REPO_SET_CONFIG").map(PathBuf::from),
-            home_dir(),
-        )?;
-
-        if !fs::exists(&path)? {
-            return Err(anyhow!("No config file found at {}", path.display()));
-        }
-
-        let content: String = fs::read_to_string(&path)?;
-        toml::from_str(content.as_str()).map_err(|e| anyhow!("{}: {}", path.display(), e))
-    }
 }
 
-fn resolve_config_path(
-    override_path: Option<PathBuf>,
-    home: Option<PathBuf>,
-) -> anyhow::Result<PathBuf> {
-    if let Some(path) = override_path {
-        return Ok(path);
+pub fn load_from_root<T: DeserializeOwned>(root: &Path) -> anyhow::Result<T> {
+    load_config(&repo_set_config_path(root))
+}
+
+pub fn load_from_path<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+    load_config(path)
+}
+
+fn load_config<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+    if !fs::exists(path)? {
+        return Err(anyhow!("No config file found at {}", path.display()));
     }
 
-    let mut home = home.ok_or_else(|| anyhow!("Can't get user home directory"))?;
-    home.push(".repo-set.toml");
-    Ok(home)
+    let content: String = fs::read_to_string(path)?;
+    toml::from_str(content.as_str()).map_err(|e| anyhow!("{}: {}", path.display(), e))
+}
+
+fn repo_set_config_path(root: &Path) -> PathBuf {
+    root.join(".repo-set").join("config.toml")
 }
 
 pub fn expand_clone_post_cmd(
     command: &[String],
     repo: &str,
     dest: &Path,
+    root: &Path,
 ) -> anyhow::Result<Vec<String>> {
     let dest = dest.to_string_lossy();
+    let root = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(root)
+    };
+    let root = root.to_string_lossy();
     let home = if command.iter().any(|arg| arg.contains("${home}")) {
         Some(home_dir().ok_or_else(|| anyhow!("Can't get user home directory"))?)
     } else {
@@ -123,7 +131,10 @@ pub fn expand_clone_post_cmd(
     Ok(command
         .iter()
         .map(|arg| {
-            let expanded = arg.replace("${repo}", repo).replace("${dest}", &dest);
+            let expanded = arg
+                .replace("${repo}", repo)
+                .replace("${dest}", &dest)
+                .replace("${root}", &root);
             match &home {
                 Some(home) => expanded.replace("${home}", &home.to_string_lossy()),
                 None => expanded,
@@ -140,28 +151,47 @@ fn expand_user(value: &str) -> anyhow::Result<String> {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .or_else(|_| std::env::var("LOGNAME"))
-        .map_err(|_| anyhow!("configuration uses ${{user}}, but the current user could not be determined"))?;
+        .map_err(|_| {
+            anyhow!("configuration uses ${{user}}, but the current user could not be determined")
+        })?;
 
     Ok(value.replace("${user}", &user))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, expand_clone_post_cmd, resolve_config_path};
+    use super::{Config, expand_clone_post_cmd, load_from_root, repo_set_config_path};
     use std::env::home_dir;
+    use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
 
     #[test]
-    fn config_path_uses_environment_override() {
-        let path = resolve_config_path(Some(PathBuf::from("/tmp/custom.toml")), None).unwrap();
-        assert_eq!(path, PathBuf::from("/tmp/custom.toml"));
+    fn repo_set_config_path_uses_the_root_directory() {
+        assert_eq!(
+            repo_set_config_path(Path::new("/work/repos")),
+            PathBuf::from("/work/repos/.repo-set/config.toml")
+        );
     }
 
     #[test]
-    fn config_path_falls_back_to_home() {
-        let path = resolve_config_path(None, Some(PathBuf::from("/home/tester"))).unwrap();
-        assert_eq!(path, PathBuf::from("/home/tester/.repo-set.toml"));
+    fn repo_set_loads_config_from_the_root() {
+        let root =
+            std::env::temp_dir().join(format!("repo-set-config-test-{}", std::process::id()));
+        let config_dir = root.join(".repo-set");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            repo_set_config_path(&root),
+            "[remote]\nurl = \"host\"\nlist.cmd = [\"list\"]\n",
+        )
+        .unwrap();
+
+        let config: Config = load_from_root(&root).unwrap();
+        assert_eq!(config.remote.url, "host");
+
+        fs::remove_file(repo_set_config_path(&root)).unwrap();
+        fs::remove_dir(&config_dir).unwrap();
+        fs::remove_dir(&root).unwrap();
     }
 
     fn parse(toml: &str) -> Config {
@@ -184,7 +214,6 @@ mod tests {
         assert_eq!(config.remote.list.cmd, ["ssh", "gerrit", "ls-projects"]);
         assert_eq!(config.repositories.ignore, ["a", "b"]);
         assert_eq!(config.clone.post.cmd, ["git", "submodule", "update"]);
-        assert_eq!(config.push_options(), ["l=Code-Review+2"]);
     }
 
     #[test]
@@ -200,6 +229,19 @@ mod tests {
         assert_eq!(config.remote.list.cmd, ["gerrit", "ls-projects"]);
         assert!(config.repositories.ignore.is_empty());
         assert!(config.clone.post.cmd.is_empty());
+    }
+
+    #[test]
+    fn shared_config_accepts_repo_set_settings() {
+        let config = parse(
+            r#"
+            remote.url = "host:29418"
+            remote.list.cmd = ["gerrit", "ls-projects"]
+            push.options = { l = "Code-Review+2" }
+            "#,
+        );
+
+        assert_eq!(config.remote.url, "host:29418");
     }
 
     #[test]
@@ -244,16 +286,20 @@ mod tests {
 
     #[test]
     fn expands_clone_post_command_variables() {
-        let command = vec!["${home}/${repo}:${dest}".to_string()];
+        let command = vec!["${home}/${repo}:${dest}:${root}".to_string()];
         let expanded = expand_clone_post_cmd(
             &command,
             "repo-a",
-            Path::new("/tmp/repo-a"),
+            Path::new("/tmp/repos/repo-a"),
+            Path::new("/tmp/repos"),
         )
         .unwrap();
         let home = home_dir().unwrap().to_string_lossy().into_owned();
 
-        assert_eq!(expanded, [format!("{}/repo-a:/tmp/repo-a", home)]);
+        assert_eq!(
+            expanded,
+            [format!("{}/repo-a:/tmp/repos/repo-a:/tmp/repos", home)]
+        );
     }
 
     #[test]
@@ -281,4 +327,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

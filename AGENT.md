@@ -4,10 +4,14 @@ Guidance for AI coding agents working in this repository.
 
 ## Project
 
-`repo-set` is a Rust CLI application that manages a set of git repositories under a root
-directory. A single command (clone, pull, fetch, push, status, reset, clean, stage, commit)
-operates on every repository in the set. Git operations use `git2` (libgit2). CLI arguments
+The project produces two Rust CLI applications. Git operations use `git2` (libgit2). CLI arguments
 are handled by Clap.
+
+`repo-set` manages a set of git repositories under a root
+directory. A single command (clone, pull, fetch, push, status, reset, clean, stage, commit)
+operates on every repository in the set. 
+
+`repo-clone` simply clones one or several Git repositories.
 
 ## Build & run
 
@@ -26,8 +30,12 @@ for a description and examples.
 
 ## Source layout (`src/`)
 
-- `main.rs` — CLI definition (clap derive) and command dispatch.
-- `config.rs` — loads and deserializes the configuration file.
+- `bin/repo-set.rs` — CLI definition (clap derive) and command dispatch for `repo-set`
+- `bin/repo-set/config.rs - Extends config.rs and add config settings for `repo-set`
+- `bin/repo-clone.rs` — CLI definition (clap derive) and command dispatch for `repo-clone
+- `lib.rs` — exposes shared modules to both binaries.
+- `config.rs` — shared configuration and configuration file loading.
+- `bin/repo-set/config.rs` — private `RepoSetConfig` and push options.
 - `remote.rs` — `Remote`: methods that operates on the remote repo.
 - `local.rs` — `Local`: methods that operates on a local repo.
 - `status.rs` — `ls`/status output helpers.

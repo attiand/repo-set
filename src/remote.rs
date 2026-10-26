@@ -3,24 +3,27 @@ use git2::{RemoteCallbacks, Repository};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Performs git remote operations, optionally logging debug output to stderr.
+/// Performs git remote operations, optionally logging debug output to `debug.log`.
 pub struct Remote<'a> {
     list_cmd: &'a [String],
     post_clone_cmd: &'a [String],
+    root: &'a Path,
     ignore: &'a [String],
-    debug: bool,
+    debug: u8,
 }
 
 impl<'a> Remote<'a> {
     pub fn new(
         list_cmd: &'a [String],
         post_clone_cmd: &'a [String],
+        root: &'a Path,
         ignore: &'a [String],
-        debug: bool,
+        debug: u8,
     ) -> Self {
         Self {
             list_cmd,
             post_clone_cmd,
+            root,
             ignore,
             debug,
         }
@@ -56,15 +59,18 @@ impl<'a> Remote<'a> {
         callbacks.credentials(|_url, username, _allowed_types| {
             git2::Cred::ssh_key_from_agent(username.unwrap_or("git"))
         });
-        if self.debug {
-            set_debug_callbacks(&mut callbacks, label);
+        if self.debug > 2 {
+            set_debug_callbacks(&mut callbacks, label, self.root.to_path_buf());
         }
         callbacks
     }
 
     pub fn clone(&self, repo_url: &str, dst: &Path) -> anyhow::Result<Repository> {
-        if self.debug {
-            eprintln!("[debug] clone {} -> {}", repo_url, dst.display());
+        if self.debug > 0 {
+            crate::debug::log(
+                self.root,
+                &format!("[debug] clone {} -> {}", repo_url, dst.display()),
+            )?;
         }
 
         let mut fo = git2::FetchOptions::new();
@@ -74,8 +80,8 @@ impl<'a> Remote<'a> {
         builder.fetch_options(fo);
 
         let repo = builder.clone(repo_url, dst).map_err(anyhow::Error::msg)?;
-        if self.debug {
-            eprintln!("[debug] clone done {}", dst.display());
+        if self.debug > 0 {
+            crate::debug::log(self.root, &format!("[debug] clone done {}", dst.display()))?;
         }
 
         self.run_post_clone(dst)?;
@@ -84,7 +90,7 @@ impl<'a> Remote<'a> {
     }
 
     /// Run the configured post-clone command inside the freshly cloned repo,
-    /// expanding `${repo}`, `${dest}`, and `${home}`.
+    /// expanding `${repo}`, `${dest}`, `${root}`, and `${home}`.
     fn run_post_clone(&self, dst: &Path) -> anyhow::Result<()> {
         if self.post_clone_cmd.is_empty() {
             return Ok(());
@@ -95,10 +101,14 @@ impl<'a> Remote<'a> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let dest = std::fs::canonicalize(dst)?;
-        let args = crate::config::expand_clone_post_cmd(&self.post_clone_cmd, &repo, &dest)?;
+        let args =
+            crate::config::expand_clone_post_cmd(&self.post_clone_cmd, &repo, &dest, self.root)?;
 
-        if self.debug {
-            eprintln!("[debug] post-clone {:?} in {}", args, dst.display());
+        if self.debug > 1 {
+            crate::debug::log(
+                self.root,
+                &format!("[debug] post-clone {:?} in {}", args, dst.display()),
+            )?;
         }
 
         let program = &args[0];
@@ -116,8 +126,8 @@ impl<'a> Remote<'a> {
     }
 
     pub fn fetch(&self, dst: &Path) -> anyhow::Result<()> {
-        if self.debug {
-            eprintln!("[debug] fetch {}", dst.display());
+        if self.debug > 0 {
+            crate::debug::log(self.root, &format!("[debug] fetch {}", dst.display()))?;
         }
 
         let repo = Repository::open(dst)?;
@@ -126,8 +136,8 @@ impl<'a> Remote<'a> {
     }
 
     pub fn pull(&self, dst: &Path) -> anyhow::Result<()> {
-        if self.debug {
-            eprintln!("[debug] pull {}", dst.display());
+        if self.debug > 0 {
+            crate::debug::log(self.root, &format!("[debug] pull {}", dst.display()))?;
         }
 
         let repo = Repository::open(dst)?;
@@ -142,9 +152,9 @@ impl<'a> Remote<'a> {
             .current_dir(dst)
             .output()?;
 
-        if self.debug {
-            eprint!("{}", String::from_utf8_lossy(&output.stdout));
-            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        if self.debug > 0 {
+            crate::debug::log_bytes(self.root, "[debug] git pull stdout:\n", &output.stdout)?;
+            crate::debug::log_bytes(self.root, "[debug] git pull stderr:\n", &output.stderr)?;
         }
 
         if !output.status.success() {
@@ -211,8 +221,11 @@ impl<'a> Remote<'a> {
 
     /// Push `refspec` to `origin`, sending `push_options` as git push options.
     pub fn push(&self, dst: &Path, refspec: &str, push_options: &[String]) -> anyhow::Result<()> {
-        if self.debug {
-            eprintln!("[debug] push {} {}", refspec, dst.display());
+        if self.debug > 0 {
+            crate::debug::log(
+                self.root,
+                &format!("[debug] push {} {}", refspec, dst.display()),
+            )?;
         }
 
         let repo = Repository::open(dst)?;
@@ -233,8 +246,12 @@ impl<'a> Remote<'a> {
                 }
                 Ok(())
             });
-            if self.debug {
-                set_debug_callbacks(&mut callbacks, dst.display().to_string());
+            if self.debug > 0 {
+                set_debug_callbacks(
+                    &mut callbacks,
+                    dst.display().to_string(),
+                    self.root.to_path_buf(),
+                );
             }
 
             let mut po = git2::PushOptions::new();
@@ -257,21 +274,31 @@ impl<'a> Remote<'a> {
     }
 }
 
-/// Attach sideband and transfer-progress callbacks that log to stderr.
-fn set_debug_callbacks(callbacks: &mut RemoteCallbacks, label: String) {
-    callbacks.sideband_progress(|data| {
-        eprint!("remote: {}", String::from_utf8_lossy(data));
+/// Attach sideband and transfer-progress callbacks that append to `debug.log`.
+fn set_debug_callbacks(callbacks: &mut RemoteCallbacks, label: String, root: std::path::PathBuf) {
+    let sideband_root = root.clone();
+    callbacks.sideband_progress(move |data| {
+        if let Err(error) = crate::debug::log_bytes(&sideband_root, "remote: ", data) {
+            eprintln!("{error:#}");
+            return false;
+        }
         true
     });
     callbacks.transfer_progress(move |stats| {
-        eprintln!(
-            "{}: received {}/{} objects, indexed {}, {} bytes",
-            label,
-            stats.received_objects(),
-            stats.total_objects(),
-            stats.indexed_objects(),
-            stats.received_bytes()
-        );
+        if let Err(error) = crate::debug::log(
+            &root,
+            &format!(
+                "{}: received {}/{} objects, indexed {}, {} bytes",
+                label,
+                stats.received_objects(),
+                stats.total_objects(),
+                stats.indexed_objects(),
+                stats.received_bytes()
+            ),
+        ) {
+            eprintln!("{error:#}");
+            return false;
+        }
         true
     });
 }

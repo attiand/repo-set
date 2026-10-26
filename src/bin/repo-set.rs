@@ -1,15 +1,18 @@
-mod config;
+#[path = "../local.rs"]
 mod local;
+#[path = "../pool.rs"]
 mod pool;
-mod remote;
+#[path = "../status.rs"]
 mod status;
 
+#[path = "../progress.rs"]
 mod progress;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use crossbeam_channel::unbounded;
+use repo_set::remote;
 use std::path::PathBuf;
 
 /// Simplify managing a set of git repositories
@@ -58,17 +61,11 @@ enum ListType {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Clone repositories, ignoring existing ones
+    /// Create an initial configuration file
+    Init,
+    /// Clone all repositories in the set
     #[clap(alias = "c")]
-    Clone {
-        /// Repository names to clone
-        #[clap(value_name = "REPO-NAME", num_args = 1.., required_unless_present = "all")]
-        repos: Vec<String>,
-
-        /// Clone all repositories
-        #[arg(long, default_value_t = false, conflicts_with = "repos")]
-        all: bool,
-    },
+    Clone,
     /// List repositories
     #[clap(alias = "ls")]
     List {
@@ -137,6 +134,15 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if let Commands::Init = &cli.command {
+        let path = repo_set_config::init(&cli.root)?;
+        println!(
+            "Created {}. Edit the remote settings before use.",
+            path.display()
+        );
+        return Ok(());
+    }
+
     if let Commands::Completion { shell } = &cli.command {
         let mut cmd = Cli::command();
         let name = cmd.get_name().to_string();
@@ -144,7 +150,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let config = config::Config::new()?;
+    let repo_set_config = repo_set_config::RepoSetConfig::new(&cli.root)?;
+    let config = &repo_set_config.common;
     let configured_url = config.remote_url()?;
     let remote_list_cmd = config.remote_list_cmd()?;
     let base_url = cli.host.as_deref().unwrap_or(&configured_url);
@@ -156,34 +163,30 @@ fn main() -> Result<()> {
         &cli.ignore_repos
     };
 
-    let push_options = config.push_options();
+    let push_options = repo_set_config.push_options();
 
     let remote = remote::Remote::new(
         &remote_list_cmd,
         &config.clone.post.cmd,
+        &cli.root,
         ignore,
-        cli.debug > 0,
+        cli.debug,
     );
-    let local = local::Local::new(ignore, cli.debug > 0);
+    let local = local::Local::new(ignore, &cli.root, cli.debug > 0);
 
     if cli.debug > 0 {
-        eprintln!(
-            "[debug] using {} worker threads",
-            pool::worker_count(cli.threads, usize::MAX)
-        );
+        repo_set::debug::log(
+            &cli.root,
+            &format!(
+                "[debug] using {} worker threads",
+                pool::worker_count(cli.threads, usize::MAX)
+            ),
+        )?;
     }
 
     match &cli.command {
-        Commands::Clone { repos, all } => {
-            let repos = if *all {
-                remote.repo_list()?
-            } else {
-                repos
-                    .iter()
-                    .filter(|r| !ignore.iter().any(|i| i == *r))
-                    .cloned()
-                    .collect()
-            };
+        Commands::Clone => {
+            let repos = remote.repo_list()?;
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
@@ -304,8 +307,7 @@ fn main() -> Result<()> {
             let (sender, receiver) = unbounded::<progress::Update>();
 
             let workers = pool::worker_count(cli.threads, local_repos.len());
-            let consumer =
-                progress::create_writer(receiver, local_repos.len(), workers, "Pushing");
+            let consumer = progress::create_writer(receiver, local_repos.len(), workers, "Pushing");
 
             pool::for_each_io(&local_repos, cli.threads, |slot, r| {
                 let mut dest = cli.root.clone();
@@ -413,8 +415,7 @@ fn main() -> Result<()> {
             let (sender, receiver) = unbounded::<progress::Update>();
 
             let workers = pool::worker_count(cli.threads, local_repos.len());
-            let consumer =
-                progress::create_writer(receiver, local_repos.len(), workers, "Staging");
+            let consumer = progress::create_writer(receiver, local_repos.len(), workers, "Staging");
 
             pool::for_each_io(&local_repos, cli.threads, |slot, r| {
                 let mut dest = cli.root.clone();
@@ -491,8 +492,30 @@ fn main() -> Result<()> {
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
         }
-        Commands::Completion { .. } => unreachable!("handled before loading config"),
+        Commands::Init | Commands::Completion { .. } => {
+            unreachable!("handled before loading config")
+        }
     }
 
     Ok(())
+}
+#[path = "repo-set/config.rs"]
+mod repo_set_config;
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn clone_command_accepts_no_repository_arguments() {
+        let cli = Cli::try_parse_from(["repo-set", "clone"]).unwrap();
+        assert!(matches!(cli.command, Commands::Clone));
+    }
+
+    #[test]
+    fn clone_command_rejects_repository_arguments_and_all_flag() {
+        assert!(Cli::try_parse_from(["repo-set", "clone", "repo-a"]).is_err());
+        assert!(Cli::try_parse_from(["repo-set", "clone", "--all"]).is_err());
+    }
 }

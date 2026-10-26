@@ -12,12 +12,17 @@ pub struct FileStatus {
 /// Operates on the local repo set, optionally logging debug output to stderr.
 pub struct Local<'a> {
     ignore: &'a [String],
+    root: &'a Path,
     debug: bool,
 }
 
 impl<'a> Local<'a> {
-    pub fn new(ignore: &'a [String], debug: bool) -> Self {
-        Self { ignore, debug }
+    pub fn new(ignore: &'a [String], root: &'a Path, debug: bool) -> Self {
+        Self {
+            ignore,
+            root,
+            debug,
+        }
     }
 
     pub fn repo_exist(&self, root: &Path, repo: &str) -> bool {
@@ -31,8 +36,9 @@ impl<'a> Local<'a> {
         for e in fs::read_dir(root)? {
             let p = e?.path();
 
-            if p.join(".git").is_dir()
-                && let Some(f) = p.file_name()
+            if let Some(f) = p.file_name()
+                && !f.to_string_lossy().starts_with('.')
+                && p.join(".git").is_dir()
             {
                 let name = f.to_str().expect("Can't convert file name");
                 if !self.ignore.iter().any(|i| i == name) {
@@ -51,9 +57,10 @@ impl<'a> Local<'a> {
         for e in fs::read_dir(root)? {
             let p = e?.path();
 
-            if p.is_dir()
+            if let Some(f) = p.file_name()
+                && !f.to_string_lossy().starts_with('.')
+                && p.is_dir()
                 && !p.join(".git").is_dir()
-                && let Some(f) = p.file_name()
             {
                 res.push(f.to_str().expect("Can't convert file name").to_string());
             }
@@ -66,11 +73,14 @@ impl<'a> Local<'a> {
     /// (a revspec such as `origin/master`) or to HEAD when `target` is None.
     pub fn reset_hard(&self, dst: &Path, target: Option<&str>) -> anyhow::Result<()> {
         if self.debug {
-            eprintln!(
-                "[debug] reset --hard {} {}",
-                target.unwrap_or("HEAD"),
-                dst.display()
-            );
+            repo_set::debug::log(
+                self.root,
+                &format!(
+                    "[debug] reset --hard {} {}",
+                    target.unwrap_or("HEAD"),
+                    dst.display()
+                ),
+            )?;
         }
 
         let repo = Repository::open(dst)?;
@@ -109,7 +119,10 @@ impl<'a> Local<'a> {
     /// `git add --update`. Untracked files are left unstaged.
     pub fn stage_update(&self, dst: &Path) -> anyhow::Result<()> {
         if self.debug {
-            eprintln!("[debug] stage --update {}", dst.display());
+            repo_set::debug::log(
+                self.root,
+                &format!("[debug] stage --update {}", dst.display()),
+            )?;
         }
 
         let repo = Repository::open(dst)?;
@@ -147,7 +160,7 @@ impl<'a> Local<'a> {
     /// left untouched. Returns true when a commit was created.
     pub fn commit(&self, dst: &Path, message: &str) -> anyhow::Result<bool> {
         if self.debug {
-            eprintln!("[debug] commit {}", dst.display());
+            repo_set::debug::log(self.root, &format!("[debug] commit {}", dst.display()))?;
         }
 
         let repo = Repository::open(dst)?;
@@ -201,7 +214,7 @@ impl<'a> Local<'a> {
     /// files are left in place.
     pub fn clean(&self, dst: &Path) -> anyhow::Result<()> {
         if self.debug {
-            eprintln!("[debug] clean {}", dst.display());
+            repo_set::debug::log(self.root, &format!("[debug] clean {}", dst.display()))?;
         }
 
         for rel in self.clean_list(dst)? {
@@ -305,4 +318,27 @@ fn short_flags(s: git2::Status) -> (char, char) {
     };
 
     (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Local;
+    use git2::Repository;
+    use std::fs;
+
+    #[test]
+    fn ignores_dot_prefixed_directories_when_discovering_local_repos() {
+        let root = std::env::temp_dir().join(format!("repo-set-local-test-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        Repository::init(root.join("visible-repo")).unwrap();
+        Repository::init(root.join(".hidden-repo")).unwrap();
+        fs::create_dir(root.join("visible-directory")).unwrap();
+        fs::create_dir(root.join(".hidden-directory")).unwrap();
+
+        let local = Local::new(&[], &root, false);
+        assert_eq!(local.repos(&root).unwrap(), ["visible-repo"]);
+        assert_eq!(local.non_repos(&root).unwrap(), ["visible-directory"]);
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
