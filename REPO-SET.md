@@ -7,25 +7,13 @@ Implemented sub commands:
 ## init
 
 Create an initial `.repo-set/config.toml` in the root directory (the current
-directory by default). Missing directories are created; existing config files
-are never overwritten. This command does not require an existing configuration.
-
-```bash
-repo-set init
-repo-set --root path/to/repos init
-```
+directory by default). 
 
 Edit the generated example remote URL and repository-listing command before use.
 
 ## clone
 
-Clone remote repositories selected by `repositories.include` and
-`repositories.exclude` to the root directory.
-
-## Debug logging
-
-Use `--debug` to append debug output to `debug.log` in the root directory. Repeat
-the flag to include more detail, such as the expanded post-clone command.
+Clone all remote repositories. Ignoring any existing local repositories.
 
 ## list
 
@@ -33,11 +21,11 @@ List remote, local or difference between remote and local.
 
 ## fetch
 
-Fetch all local repos
+Fetch all local repos.
 
 ## pull
 
-Pull all local repos
+Pull all local repos.
 
 ## reset
 
@@ -74,6 +62,11 @@ repo-set push --push-option='m=#AS' HEAD:refs/for/master
 ## help
 
 Print help information.
+
+# Debug
+
+Use `--debug` to append debug output to `debug.log` in the root directory. Repeat
+the flag to include more details.
 
 # Install
 
@@ -141,7 +134,7 @@ exclude = ["*-archive"]
 
 [clone]
 # Add commit hook
-post.cmd = [ "cp", "${home}/.hooks/commit-msg", "${dest}/.git/hooks/commit-msg" ]
+post.cmd = [ "cp", "${root}/.repo-set/commit-msg", "${dest}/.git/hooks/commit-msg" ]
 
 [push.options]
 # Always vote +2
