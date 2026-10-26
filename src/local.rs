@@ -1,4 +1,5 @@
 use git2::Repository;
+use repo_set::config::RepositoryFilter;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -9,17 +10,17 @@ pub struct FileStatus {
     pub path: String,
 }
 
-/// Operates on the local repo set, optionally logging debug output to stderr.
+/// Operates on the local repo set, optionally logging debug output to `debug.log`.
 pub struct Local<'a> {
-    ignore: &'a [String],
+    repository_filter: &'a RepositoryFilter,
     root: &'a Path,
     debug: bool,
 }
 
 impl<'a> Local<'a> {
-    pub fn new(ignore: &'a [String], root: &'a Path, debug: bool) -> Self {
+    pub fn new(repository_filter: &'a RepositoryFilter, root: &'a Path, debug: bool) -> Self {
         Self {
-            ignore,
+            repository_filter,
             root,
             debug,
         }
@@ -29,7 +30,7 @@ impl<'a> Local<'a> {
         root.join(repo).exists()
     }
 
-    /// List local repository directories, excluding any configured to be ignored.
+    /// List local repository directories allowed by the configured patterns.
     pub fn repos(&self, root: &Path) -> anyhow::Result<Vec<String>> {
         let mut res = Vec::new();
 
@@ -41,7 +42,7 @@ impl<'a> Local<'a> {
                 && p.join(".git").is_dir()
             {
                 let name = f.to_str().expect("Can't convert file name");
-                if !self.ignore.iter().any(|i| i == name) {
+                if self.repository_filter.includes(name) {
                     res.push(name.to_string());
                 }
             }
@@ -324,6 +325,7 @@ fn short_flags(s: git2::Status) -> (char, char) {
 mod tests {
     use super::Local;
     use git2::Repository;
+    use repo_set::config::RepositoryFilter;
     use std::fs;
 
     #[test]
@@ -331,11 +333,15 @@ mod tests {
         let root = std::env::temp_dir().join(format!("repo-set-local-test-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         Repository::init(root.join("visible-repo")).unwrap();
+        Repository::init(root.join("visible-blocked")).unwrap();
         Repository::init(root.join(".hidden-repo")).unwrap();
         fs::create_dir(root.join("visible-directory")).unwrap();
         fs::create_dir(root.join(".hidden-directory")).unwrap();
 
-        let local = Local::new(&[], &root, false);
+        let filter =
+            RepositoryFilter::new(&["visible-*".to_string()], &["visible-blocked".to_string()])
+                .unwrap();
+        let local = Local::new(&filter, &root, false);
         assert_eq!(local.repos(&root).unwrap(), ["visible-repo"]);
         assert_eq!(local.non_repos(&root).unwrap(), ["visible-directory"]);
 

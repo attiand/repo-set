@@ -44,8 +44,8 @@ for a description and examples.
 
 ## Conventions
 
-- `Remote` and `Local` take `&[String]` slices (e.g. the ignore list), not the
-  `Config` struct, so they stay decoupled from configuration loading.
+- `Remote` and `Local` take the shared repository filter, not the `Config`
+  struct, so they stay decoupled from configuration loading.
 - Errors propagate with `anyhow::Result`.
 - Keep comments to a single line that states what the code cannot show on its
   own; do not restate what the next line does.

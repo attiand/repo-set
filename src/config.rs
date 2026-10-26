@@ -1,6 +1,7 @@
 use anyhow::anyhow;
+use glob::Pattern;
 use serde::Deserialize;
-use serde::de::{DeserializeOwned, IgnoredAny};
+use serde::de::DeserializeOwned;
 use std::path::{Path, PathBuf};
 use std::{env::home_dir, fs};
 
@@ -21,7 +22,48 @@ pub struct List {
 #[serde(deny_unknown_fields)]
 pub struct Repo {
     #[serde(default)]
-    pub ignore: Vec<String>,
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+pub struct RepositoryFilter {
+    include: Vec<Pattern>,
+    exclude: Vec<Pattern>,
+}
+
+impl RepositoryFilter {
+    pub fn new(include: &[String], exclude: &[String]) -> anyhow::Result<Self> {
+        let include = include
+            .iter()
+            .map(|pattern| {
+                Pattern::new(pattern).map_err(|error| {
+                    anyhow!("Invalid repositories.include pattern {pattern:?}: {error}")
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let exclude = exclude
+            .iter()
+            .map(|pattern| {
+                Pattern::new(pattern).map_err(|error| {
+                    anyhow!("Invalid repositories.exclude pattern {pattern:?}: {error}")
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(Self { include, exclude })
+    }
+
+    pub fn includes(&self, repository: &str) -> bool {
+        (self.include.is_empty()
+            || self
+                .include
+                .iter()
+                .any(|pattern| pattern.matches(repository)))
+            && !self
+                .exclude
+                .iter()
+                .any(|pattern| pattern.matches(repository))
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -46,9 +88,6 @@ struct FileConfig {
     pub repositories: Repo,
     #[serde(default)]
     pub clone: Clone,
-    #[serde(default)]
-    #[serde(rename = "push")]
-    _push: Option<IgnoredAny>,
 }
 
 #[derive(Deserialize)]
@@ -204,15 +243,16 @@ mod tests {
             r#"
             remote.url = "my-gerrit:29418"
             remote.list.cmd = ["ssh", "gerrit", "ls-projects"]
-            repositories.ignore = ["a", "b"]
+            repositories.include = ["team-*", "tools-?"]
+            repositories.exclude = ["*-archive"]
             clone.post.cmd = ["git", "submodule", "update"]
-            push.options = { l = "Code-Review+2" }
             "#,
         );
 
         assert_eq!(config.remote.url, "my-gerrit:29418");
         assert_eq!(config.remote.list.cmd, ["ssh", "gerrit", "ls-projects"]);
-        assert_eq!(config.repositories.ignore, ["a", "b"]);
+        assert_eq!(config.repositories.include, ["team-*", "tools-?"]);
+        assert_eq!(config.repositories.exclude, ["*-archive"]);
         assert_eq!(config.clone.post.cmd, ["git", "submodule", "update"]);
     }
 
@@ -227,13 +267,14 @@ mod tests {
 
         assert_eq!(config.remote.url, "host:29418");
         assert_eq!(config.remote.list.cmd, ["gerrit", "ls-projects"]);
-        assert!(config.repositories.ignore.is_empty());
+        assert!(config.repositories.include.is_empty());
+        assert!(config.repositories.exclude.is_empty());
         assert!(config.clone.post.cmd.is_empty());
     }
 
     #[test]
-    fn shared_config_accepts_repo_set_settings() {
-        let config = parse(
+    fn shared_config_rejects_repo_set_only_settings() {
+        let result = toml::from_str::<Config>(
             r#"
             remote.url = "host:29418"
             remote.list.cmd = ["gerrit", "ls-projects"]
@@ -241,7 +282,7 @@ mod tests {
             "#,
         );
 
-        assert_eq!(config.remote.url, "host:29418");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -310,8 +351,41 @@ mod tests {
 
     #[test]
     fn missing_url_fails() {
-        let result = toml::from_str::<Config>("repositories.ignore = [\"a\"]");
+        let result = toml::from_str::<Config>("repositories.unknown = [\"a\"]");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn repository_filter_applies_include_and_exclude_globs() {
+        use super::RepositoryFilter;
+
+        let filter = RepositoryFilter::new(
+            &["team-*".to_string(), "tools-?".to_string()],
+            &["*-archive".to_string()],
+        )
+        .unwrap();
+
+        assert!(filter.includes("team-service"));
+        assert!(filter.includes("tools-x"));
+        assert!(!filter.includes("tools-xy"));
+        assert!(!filter.includes("team-archive"));
+        assert!(!filter.includes("other"));
+    }
+
+    #[test]
+    fn repository_filter_defaults_to_include_all_and_exclude_none() {
+        use super::RepositoryFilter;
+
+        let filter = RepositoryFilter::new(&[], &[]).unwrap();
+        assert!(filter.includes("any-repository"));
+    }
+
+    #[test]
+    fn repository_filter_rejects_invalid_globs() {
+        use super::RepositoryFilter;
+
+        assert!(RepositoryFilter::new(&["[".to_string()], &[]).is_err());
+        assert!(RepositoryFilter::new(&[], &["[".to_string()]).is_err());
     }
 
     #[test]
@@ -325,5 +399,14 @@ mod tests {
         );
 
         assert!(result.is_err());
+
+        let legacy_ignore = toml::from_str::<Config>(
+            r#"
+            remote.url = "host:29418"
+            remote.list.cmd = ["gerrit"]
+            repositories.ignore = ["repo"]
+            "#,
+        );
+        assert!(legacy_ignore.is_err());
     }
 }

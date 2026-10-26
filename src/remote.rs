@@ -1,3 +1,4 @@
+use crate::config::RepositoryFilter;
 use anyhow::anyhow;
 use git2::{RemoteCallbacks, Repository};
 use std::path::Path;
@@ -8,7 +9,7 @@ pub struct Remote<'a> {
     list_cmd: &'a [String],
     post_clone_cmd: &'a [String],
     root: &'a Path,
-    ignore: &'a [String],
+    repository_filter: &'a RepositoryFilter,
     debug: u8,
 }
 
@@ -17,19 +18,19 @@ impl<'a> Remote<'a> {
         list_cmd: &'a [String],
         post_clone_cmd: &'a [String],
         root: &'a Path,
-        ignore: &'a [String],
+        repository_filter: &'a RepositoryFilter,
         debug: u8,
     ) -> Self {
         Self {
             list_cmd,
             post_clone_cmd,
             root,
-            ignore,
+            repository_filter,
             debug,
         }
     }
 
-    /// List remote repositories, excluding any configured to be ignored.
+    /// List remote repositories allowed by the configured include/exclude patterns.
     pub fn repo_list(&self) -> anyhow::Result<Vec<String>> {
         let cmd = self.list_cmd;
         let Some(program) = cmd.first() else {
@@ -48,7 +49,7 @@ impl<'a> Remote<'a> {
         let out = String::from_utf8(output.stdout)?;
         Ok(out
             .split_whitespace()
-            .filter(|r| !self.ignore.iter().any(|i| i == r))
+            .filter(|repo| self.repository_filter.includes(repo))
             .map(String::from)
             .collect())
     }

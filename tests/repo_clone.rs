@@ -45,7 +45,7 @@ impl Fixture {
         config.insert(
             "repositories".into(),
             toml::Value::Table(toml::Table::from_iter([(
-                "ignore".into(),
+                "exclude".into(),
                 toml::Value::try_from(["ignored"]).unwrap(),
             )])),
         );
@@ -65,6 +65,20 @@ impl Fixture {
         )
         .unwrap();
         Self { root }
+    }
+
+    fn set_repository_filters(&self, include: &[&str], exclude: &[&str]) {
+        let config_path = self.root.join(".repo-clone/config.toml");
+        let mut config: toml::Value =
+            toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+        let repositories = config
+            .get_mut("repositories")
+            .unwrap()
+            .as_table_mut()
+            .unwrap();
+        repositories.insert("include".into(), toml::Value::try_from(include).unwrap());
+        repositories.insert("exclude".into(), toml::Value::try_from(exclude).unwrap());
+        fs::write(config_path, toml::to_string(&config).unwrap()).unwrap();
     }
 
     fn run(&self, args: &[&str]) -> Output {
@@ -202,6 +216,27 @@ fn all_clones_non_ignored_repositories_and_runs_post_clone_command() {
                 .exists()
         );
     }
+    assert!(!fixture.root.join("dest/ignored").exists());
+}
+
+#[test]
+fn repository_globs_filter_all_and_explicit_clone_selection() {
+    let fixture = Fixture::new(&["printf", "repo-a\nrepo-b\nignored\n"], &[]);
+    fixture.set_repository_filters(&["repo-*"], &["repo-b"]);
+
+    let output = fixture.run(&["--all"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(fixture.root.join("dest/repo-a").exists());
+    assert!(!fixture.root.join("dest/repo-b").exists());
+    assert!(!fixture.root.join("dest/ignored").exists());
+
+    let fixture = Fixture::new(&["false"], &[]);
+    fixture.set_repository_filters(&["repo-*"], &["repo-b"]);
+
+    let output = fixture.run(&["repo-a", "repo-b", "ignored"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(fixture.root.join("dest/repo-a").exists());
+    assert!(!fixture.root.join("dest/repo-b").exists());
     assert!(!fixture.root.join("dest/ignored").exists());
 }
 

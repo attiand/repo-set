@@ -12,6 +12,7 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use crossbeam_channel::unbounded;
+use repo_set::config;
 use repo_set::remote;
 use std::path::PathBuf;
 
@@ -31,7 +32,7 @@ struct Cli {
     #[arg(long, action = clap::ArgAction::Count)]
     debug: u8,
 
-    /// Repository name to ignore, may be specified multiple times
+    /// Repository glob to exclude, may be specified multiple times
     #[arg(long = "ignore-repo", num_args(1), value_name("REPO-NAME"))]
     ignore_repos: Vec<String>,
 
@@ -156,12 +157,13 @@ fn main() -> Result<()> {
     let remote_list_cmd = config.remote_list_cmd()?;
     let base_url = cli.host.as_deref().unwrap_or(&configured_url);
 
-    // --ignore-repos overrides the ignore list from the configuration.
-    let ignore = if cli.ignore_repos.is_empty() {
-        &config.repositories.ignore
+    // --ignore-repos overrides repositories.exclude from the configuration.
+    let exclude = if cli.ignore_repos.is_empty() {
+        &config.repositories.exclude
     } else {
         &cli.ignore_repos
     };
+    let repository_filter = config::RepositoryFilter::new(&config.repositories.include, exclude)?;
 
     let push_options = repo_set_config.push_options();
 
@@ -169,10 +171,10 @@ fn main() -> Result<()> {
         &remote_list_cmd,
         &config.clone.post.cmd,
         &cli.root,
-        ignore,
+        &repository_filter,
         cli.debug,
     );
-    let local = local::Local::new(ignore, &cli.root, cli.debug > 0);
+    let local = local::Local::new(&repository_filter, &cli.root, cli.debug > 0);
 
     if cli.debug > 0 {
         repo_set::debug::log(

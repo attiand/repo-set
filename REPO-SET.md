@@ -19,7 +19,8 @@ Edit the generated example remote URL and repository-listing command before use.
 
 ## clone
 
-Clone all remote repositories, excluding ignored repositories, to the root directory.
+Clone remote repositories selected by `repositories.include` and
+`repositories.exclude` to the root directory.
 
 ## Debug logging
 
@@ -90,15 +91,16 @@ the user's home directory is read.
 |---------------------|----------|-----------------------------------------------|
 |remote.url           |yes       |The git remote URL                             |
 |remote.list.cmd      |yes       |A command to run to get a list of remote repos |
-|repositories.ignore  |no        |An array of repos to ignore                    |
+|repositories.include |no |Glob patterns selecting repositories; defaults to all      |
+|repositories.exclude |no |Glob patterns excluding repositories; defaults to none    |
 |clone.post.cmd       |no        |A command to run after each clone              |
 |push.options         |no        |A table of git push options                    |
 
-Both binaries can access shared settings through the library's `config::Config`.
-`RepoSetConfig` lives in `src/bin/repo-set/config.rs`, private to the `repo-set`
-binary, and adds `push.options`. The binaries use their respective config file
-locations. The shared configuration ignores the `push` section; only `repo-set`
-exposes and validates its contents. Unknown shared fields are still rejected.
+`push.options` is supported only by `repo-set`. The two binaries use their
+respective config file locations, and unknown fields are rejected.
+Patterns support `*` (any number of characters), `?` (one character), and
+character classes such as `[abc]`. If `include` is non-empty, a repository must
+match at least one include pattern; any match in `exclude` takes precedence.
 
 
 ## Variables
@@ -134,7 +136,8 @@ url = "ssh://${user}@my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://${user}@my-gerrit:29418", "gerrit" ,"ls-projects" ]
 
 [repositories]
-ignore = ["repo1", "repo2"]
+include = ["team-*", "tools-?"]
+exclude = ["*-archive"]
 
 [clone]
 # Add commit hook
@@ -143,4 +146,7 @@ post.cmd = [ "cp", "${home}/.hooks/commit-msg", "${dest}/.git/hooks/commit-msg" 
 [push.options]
 # Always vote +2
 l = "Code-Review+2"
+
+# Auto submit
+#m=#AS
 ```

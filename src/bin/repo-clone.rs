@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::env::Shells;
 use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate, Shell};
+use repo_set::config::RepositoryFilter;
 use repo_set::remote;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -27,7 +28,7 @@ struct Cli {
         add = ArgValueCompleter::new(complete_repositories))]
     repos: Vec<String>,
 
-    /// Clone all remote repositories, excluding ignored repositories
+    /// Clone all remote repositories allowed by include/exclude patterns
     #[arg(long, conflicts_with = "repos")]
     all: bool,
 
@@ -53,14 +54,9 @@ fn complete_repositories(current: &OsStr) -> Vec<CompletionCandidate> {
     let repositories = || -> Result<Vec<String>> {
         let config = repo_clone_config::load()?;
         let list_cmd = config.remote_list_cmd()?;
-        remote::Remote::new(
-            &list_cmd,
-            &[],
-            Path::new("."),
-            &config.repositories.ignore,
-            0,
-        )
-        .repo_list()
+        let repository_filter =
+            RepositoryFilter::new(&config.repositories.include, &config.repositories.exclude)?;
+        remote::Remote::new(&list_cmd, &[], Path::new("."), &repository_filter, 0).repo_list()
     };
     repositories()
         .unwrap_or_default()
@@ -91,14 +87,21 @@ fn main() -> Result<()> {
     let config = repo_clone_config::load()?;
     let base_url = config.remote_url()?;
     let list_cmd = config.remote_list_cmd()?;
-    let ignore = &config.repositories.ignore;
-    let remote = remote::Remote::new(&list_cmd, &config.clone.post.cmd, &cli.root, ignore, 0);
+    let repository_filter =
+        RepositoryFilter::new(&config.repositories.include, &config.repositories.exclude)?;
+    let remote = remote::Remote::new(
+        &list_cmd,
+        &config.clone.post.cmd,
+        &cli.root,
+        &repository_filter,
+        0,
+    );
     let repos = if cli.all {
         remote.repo_list()?
     } else {
         cli.repos
             .into_iter()
-            .filter(|repo| !ignore.contains(repo))
+            .filter(|repo| repository_filter.includes(repo))
             .collect()
     };
 

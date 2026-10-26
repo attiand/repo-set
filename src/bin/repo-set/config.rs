@@ -94,7 +94,8 @@ mod tests {
         let config: RepoSetConfig = toml::from_str(INITIAL_CONFIG).unwrap();
         assert!(!config.common.remote.url.is_empty());
         assert!(!config.common.remote.list.cmd.is_empty());
-        assert!(config.common.repositories.ignore.is_empty());
+        assert!(config.common.repositories.include.is_empty());
+        assert!(config.common.repositories.exclude.is_empty());
         assert!(config.common.clone.post.cmd.is_empty());
         assert!(config.push_options().is_empty());
     }
@@ -102,7 +103,8 @@ mod tests {
     const COMMON: &str = r#"
         remote.url = "host:29418"
         remote.list.cmd = ["gerrit", "ls-projects"]
-        repositories.ignore = ["ignored"]
+        repositories.include = ["team-*"]
+        repositories.exclude = ["*-archive"]
         clone.post.cmd = ["git", "submodule", "update"]
     "#;
 
@@ -115,7 +117,8 @@ mod tests {
 
         assert_eq!(config.common.remote.url, "host:29418");
         assert_eq!(config.common.remote.list.cmd, ["gerrit", "ls-projects"]);
-        assert_eq!(config.common.repositories.ignore, ["ignored"]);
+        assert_eq!(config.common.repositories.include, ["team-*"]);
+        assert_eq!(config.common.repositories.exclude, ["*-archive"]);
         assert_eq!(config.common.clone.post.cmd, ["git", "submodule", "update"]);
         assert_eq!(config.push_options(), ["l=Code-Review+2"]);
     }
