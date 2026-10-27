@@ -12,18 +12,22 @@ List all remote repos.
 
 Clone one or several remote repositories to root. The repo list allows globs.
 
+## help
+
+Print help information.
+
 # Configuration file
 
 `remote-repo` reads a configuration file `.remote-repo/config.toml` in the user's
 home directory.
 
-|Key                  |Mandatory |Description                                    |
-|---------------------|----------|-----------------------------------------------|
-|remote.url           |yes       |The git remote URL                             |
-|remote.list.cmd      |yes       |A command to run to get a list of remote repos |
-|repositories.include |no |Glob patterns selecting repositories; defaults to all      |
-|repositories.exclude |no |Glob patterns excluding repositories; defaults to none    |
-|clone.post.cmd       |no        |A command to run after each clone              |
+|Key                  |Mandatory |Description                                           |
+|---------------------|----------|------------------------------------------------------|
+|remote.url           |yes       |The git remote URL                                    |
+|remote.list.cmd      |yes       |A command to run to get a list of remote repos        |
+|repositories.include |no        |Glob patterns selecting repositories; defaults to all |
+|repositories.exclude |no        |Glob patterns excluding repositories; defaults to none|
+|clone.post.cmd       |no        |A command to run after each clone                     |
 
 ## Variables
 
@@ -38,7 +42,7 @@ There are limited variable expansion support:
 |root  |clone.post.cmd              |The absolute path to the root directory|
 
 
-## Example
+## Minimal example
 
 Minimal config to use with a Gerrit server:
 
@@ -48,9 +52,7 @@ url = "ssh://${user}@my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://${user}@my-gerrit:29418", "gerrit" ,"ls-projects" ]
 ```
 
-## Example
-
-Full configuration example:
+## Full example
 
 ```toml
 [remote]

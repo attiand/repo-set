@@ -7,7 +7,7 @@ Sub commands:
 ## init
 
 Create an initial `.repo-set/config.toml` in the root directory (the current
-directory by default). 
+directory by default).
 
 Edit the generated example remote URL and repository-listing command before use.
 
@@ -63,30 +63,19 @@ repo-set push --push-option='m=#AS' HEAD:refs/for/master
 
 Print help information.
 
-# Debug
-
-Use `--debug` to append debug output to `debug.log` in the root directory. Repeat
-the flag to include more details.
-
-# Install
-
-```bash
-cargo install --git https://github.com/attiand/repo-set.git
-```
-
 # Configuration file
 
 `repo-set` reads the configuration file `.repo-set/config.toml` in the root
 directory specified by `--root` (the current directory by default).
 
-|Key                  |Mandatory |Description                                    |
-|---------------------|----------|-----------------------------------------------|
-|remote.url           |yes       |The git remote URL                             |
-|remote.list.cmd      |yes       |A command to run to get a list of remote repos |
-|repositories.include |no |Glob patterns selecting repositories; defaults to all      |
-|repositories.exclude |no |Glob patterns excluding repositories; defaults to none    |
-|clone.post.cmd       |no        |A command to run after each clone              |
-|push.options         |no        |A table of git push options                    |
+|Key                  |Mandatory |Description                                           |
+|---------------------|----------|------------------------------------------------------|
+|remote.url           |yes       |The git remote URL                                    |
+|remote.list.cmd      |yes       |A command to run to get a list of remote repos        |
+|repositories.include |no        |Glob patterns selecting repositories; defaults to all |
+|repositories.exclude |no        |Glob patterns excluding repositories; defaults to none|
+|clone.post.cmd       |no        |A command to run after each clone                     |
+|push.options         |no        |A table of git push options                           |
 
 
 ## Variables
@@ -102,7 +91,7 @@ There are limited variable expansion support:
 |root  |clone.post.cmd              |The absolute path to the root directory|
 
 
-## Example
+## Minimal example
 
 Minimal config to use with a Gerrit server:
 
@@ -112,9 +101,7 @@ url = "ssh://${user}@my-gerrit:29418"
 list.cmd = [ "ssh", "ssh://${user}@my-gerrit:29418", "gerrit" ,"ls-projects" ]
 ```
 
-## Example
-
-Full configuration example:
+## Full example
 
 ```toml
 [remote]
