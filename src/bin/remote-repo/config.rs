@@ -9,7 +9,7 @@ pub(super) fn load() -> Result<Config> {
 }
 
 fn config_path(home: &Path) -> PathBuf {
-    home.join(".repo-clone").join("config.toml")
+    home.join(".remote-repo").join("config.toml")
 }
 
 #[cfg(test)]
@@ -21,7 +21,7 @@ mod tests {
     fn config_path_uses_home_directory() {
         assert_eq!(
             config_path(Path::new("/home/tester")),
-            PathBuf::from("/home/tester/.repo-clone/config.toml")
+            PathBuf::from("/home/tester/.remote-repo/config.toml")
         );
     }
 }

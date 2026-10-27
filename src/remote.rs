@@ -103,7 +103,7 @@ impl<'a> Remote<'a> {
             .unwrap_or_default();
         let dest = std::fs::canonicalize(dst)?;
         let args =
-            crate::config::expand_clone_post_cmd(&self.post_clone_cmd, &repo, &dest, self.root)?;
+            crate::config::expand_clone_post_cmd(self.post_clone_cmd, &repo, &dest, self.root)?;
 
         if self.debug > 1 {
             crate::debug::log(

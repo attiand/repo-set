@@ -11,4 +11,4 @@ See [repo-set](REPO-SET.md) for more information.
 
 `repo-clone` is a simple utility that clone or list remote repositories. `repo-clone` reads the configuration file `.repo-clone/config.toml` in the user's home directory.
 
-See [repo-clone](REPO-CLONE.md) for more information.
+See [remote-repo](REMOTE-REPO.md) for more information.

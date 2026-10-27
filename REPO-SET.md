@@ -2,7 +2,7 @@
 
 Handles a set of git repos. A typical git command such as `reset` resets all repos in the set. The location of the local set is current working directory or specified with the `--root` option.
 
-Implemented sub commands:
+Sub commands:
 
 ## init
 
@@ -77,8 +77,7 @@ cargo install --git https://github.com/attiand/repo-set.git
 # Configuration file
 
 `repo-set` reads the configuration file `.repo-set/config.toml` in the root
-directory specified by `--root` (the current directory by default). No file in
-the user's home directory is read.
+directory specified by `--root` (the current directory by default).
 
 |Key                  |Mandatory |Description                                    |
 |---------------------|----------|-----------------------------------------------|
@@ -88,12 +87,6 @@ the user's home directory is read.
 |repositories.exclude |no |Glob patterns excluding repositories; defaults to none    |
 |clone.post.cmd       |no        |A command to run after each clone              |
 |push.options         |no        |A table of git push options                    |
-
-`push.options` is supported only by `repo-set`. The two binaries use their
-respective config file locations, and unknown fields are rejected.
-Patterns support `*` (any number of characters), `?` (one character), and
-character classes such as `[abc]`. If `include` is non-empty, a repository must
-match at least one include pattern; any match in `exclude` takes precedence.
 
 
 ## Variables

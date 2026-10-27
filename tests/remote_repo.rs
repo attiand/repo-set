@@ -13,12 +13,12 @@ struct Fixture {
 impl Fixture {
     fn new(list_cmd: &[&str], post_cmd: &[&str]) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "repo-clone-cli-{}-{}",
+            "remote-repo-cli-{}-{}",
             std::process::id(),
             NEXT_ID.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&root).unwrap();
-        fs::create_dir(root.join(".repo-clone")).unwrap();
+        fs::create_dir(root.join(".remote-repo")).unwrap();
         fs::create_dir(root.join("sources")).unwrap();
         for name in ["repo-a", "repo-b", "ignored"] {
             let repo = Repository::init(root.join("sources").join(name)).unwrap();
@@ -60,7 +60,7 @@ impl Fixture {
             )])),
         );
         fs::write(
-            root.join(".repo-clone/config.toml"),
+            root.join(".remote-repo/config.toml"),
             toml::to_string(&config).unwrap(),
         )
         .unwrap();
@@ -68,7 +68,7 @@ impl Fixture {
     }
 
     fn set_repository_filters(&self, include: &[&str], exclude: &[&str]) {
-        let config_path = self.root.join(".repo-clone/config.toml");
+        let config_path = self.root.join(".remote-repo/config.toml");
         let mut config: toml::Value =
             toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
         let repositories = config
@@ -82,10 +82,11 @@ impl Fixture {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_repo-clone"))
+        Command::new(env!("CARGO_BIN_EXE_remote-repo"))
             .env("HOME", &self.root)
             .arg("--root")
             .arg(self.root.join("dest"))
+            .arg("clone")
             .args(args)
             .output()
             .unwrap()
@@ -101,17 +102,17 @@ impl Drop for Fixture {
 #[test]
 fn completion_generates_scripts_without_loading_config() {
     let fixture = Fixture::new(&["false"], &[]);
-    fs::remove_file(fixture.root.join(".repo-clone/config.toml")).unwrap();
+    fs::remove_file(fixture.root.join(".remote-repo/config.toml")).unwrap();
 
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_repo-clone"))
+        let output = Command::new(env!("CARGO_BIN_EXE_remote-repo"))
             .env("HOME", &fixture.root)
             .args(["completion", shell])
             .output()
             .unwrap();
         assert!(output.status.success(), "{shell}: {output:?}");
         let script = std::str::from_utf8(&output.stdout).unwrap();
-        assert!(script.contains("repo-clone"), "{shell}: {script}");
+        assert!(script.contains("remote-repo"), "{shell}: {script}");
         assert!(script.contains("COMPLETE"), "{shell}: {script}");
         assert!(output.stderr.is_empty(), "{shell}: {output:?}");
     }
@@ -126,12 +127,12 @@ fn completes_repository_names_dynamically() {
         (vec!["ignored"], vec![]),
         (vec!["missing"], vec![]),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_repo-clone"))
+        let output = Command::new(env!("CARGO_BIN_EXE_remote-repo"))
             .current_dir(&fixture.root)
             .env("HOME", &fixture.root)
             .env("COMPLETE", "bash")
-            .env("_CLAP_COMPLETE_INDEX", words.len().to_string())
-            .args(["--", "repo-clone"])
+            .env("_CLAP_COMPLETE_INDEX", (words.len() + 1).to_string())
+            .args(["--", "remote-repo", "clone"])
             .args(&words)
             .output()
             .unwrap();
@@ -148,19 +149,39 @@ fn completion_listing_failures_are_quiet() {
     let fixture = Fixture::new(&["false"], &[]);
     for missing_config in [false, true] {
         if missing_config {
-            fs::remove_file(fixture.root.join(".repo-clone/config.toml")).unwrap();
+            fs::remove_file(fixture.root.join(".remote-repo/config.toml")).unwrap();
         }
-        let output = Command::new(env!("CARGO_BIN_EXE_repo-clone"))
+        let output = Command::new(env!("CARGO_BIN_EXE_remote-repo"))
             .env("HOME", &fixture.root)
             .env("COMPLETE", "bash")
-            .env("_CLAP_COMPLETE_INDEX", "1")
-            .args(["--", "repo-clone", "repo-"])
+            .env("_CLAP_COMPLETE_INDEX", "2")
+            .args(["--", "remote-repo", "clone", "repo-"])
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
         assert!(output.stdout.is_empty(), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
     }
+}
+
+#[test]
+fn list_prints_remote_repositories_allowed_by_config() {
+    let fixture = Fixture::new(&["printf", "repo-a\nrepo-b\nignored\n"], &[]);
+    let output = Command::new(env!("CARGO_BIN_EXE_remote-repo"))
+        .env("HOME", &fixture.root)
+        .arg("list")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        ["repo-a", "repo-b"]
+    );
+    assert!(output.stderr.is_empty(), "{output:?}");
 }
 
 #[test]
@@ -187,6 +208,33 @@ fn clones_named_repositories_and_skips_ignored_and_existing_destinations() {
         "unchanged"
     );
     assert!(!fixture.root.join("dest/ignored").exists());
+}
+
+#[test]
+fn clone_host_overrides_configured_remote_url() {
+    let fixture = Fixture::new(&["false"], &[]);
+    let config_path = fixture.root.join(".remote-repo/config.toml");
+    let mut config: toml::Value =
+        toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["remote"]["url"] = toml::Value::String("invalid-base-url".into());
+    fs::write(config_path, toml::to_string(&config).unwrap()).unwrap();
+    let host = fixture.root.join("sources").to_string_lossy().into_owned();
+
+    let output = fixture.run(&["--host", &host, "repo-a"]);
+
+    assert!(output.status.success(), "{output:?}");
+    Repository::open(fixture.root.join("dest/repo-a")).unwrap();
+}
+
+#[test]
+fn debug_option_writes_remote_operation_logs() {
+    let fixture = Fixture::new(&["false"], &[]);
+    let output = fixture.run(&["--debug", "repo-a"]);
+
+    assert!(output.status.success(), "{output:?}");
+    let log = fs::read_to_string(fixture.root.join("dest/debug.log")).unwrap();
+    assert!(log.contains("[debug] clone "));
+    assert!(log.contains("[debug] clone done "));
 }
 
 #[test]
@@ -230,13 +278,25 @@ fn repository_globs_filter_all_and_explicit_clone_selection() {
     assert!(!fixture.root.join("dest/repo-b").exists());
     assert!(!fixture.root.join("dest/ignored").exists());
 
-    let fixture = Fixture::new(&["false"], &[]);
+    let fixture = Fixture::new(&["printf", "repo-a\nrepo-b\nignored\n"], &[]);
     fixture.set_repository_filters(&["repo-*"], &["repo-b"]);
 
-    let output = fixture.run(&["repo-a", "repo-b", "ignored"]);
+    let output = fixture.run(&["repo-*"]);
     assert!(output.status.success(), "{output:?}");
     assert!(fixture.root.join("dest/repo-a").exists());
     assert!(!fixture.root.join("dest/repo-b").exists());
+    assert!(!fixture.root.join("dest/ignored").exists());
+}
+
+#[test]
+fn clones_matching_repositories_for_globs_without_duplicates() {
+    let fixture = Fixture::new(&["printf", "repo-a\nrepo-b\nignored\n"], &[]);
+    let output = fixture.run(&["repo-a", "repo-*"]);
+
+    assert!(output.status.success(), "{output:?}");
+    for name in ["repo-a", "repo-b"] {
+        Repository::open(fixture.root.join("dest").join(name)).unwrap();
+    }
     assert!(!fixture.root.join("dest/ignored").exists());
 }
 
@@ -254,7 +314,7 @@ fn root_variable_works_when_repo_set_root_is_relative() {
     let config_dir = root.join(".repo-set");
     fs::create_dir_all(&config_dir).unwrap();
     fs::copy(
-        fixture.root.join(".repo-clone/config.toml"),
+        fixture.root.join(".remote-repo/config.toml"),
         config_dir.join("config.toml"),
     )
     .unwrap();
@@ -275,27 +335,23 @@ fn root_variable_works_when_repo_set_root_is_relative() {
 
 #[test]
 fn post_clone_command_is_printed_only_with_double_debug() {
-    for (debug_args, ignored_repo, expect_command) in [
-        (vec!["--debug"], "repo-b", false),
-        (vec!["--debug", "--debug"], "repo-a", true),
-    ] {
-        let fixture = Fixture::new(
-            &["printf", "repo-a\nrepo-b\n"],
-            &["touch", "${dest}/${repo}.hook"],
-        );
+    for (debug_args, expect_command) in
+        [(vec!["--debug"], false), (vec!["--debug", "--debug"], true)]
+    {
+        let fixture = Fixture::new(&["printf", "repo-a\n"], &["touch", "${dest}/${repo}.hook"]);
         let repo_set_config_dir = fixture.root.join("dest/.repo-set");
         fs::create_dir_all(&repo_set_config_dir).unwrap();
         fs::copy(
-            fixture.root.join(".repo-clone/config.toml"),
+            fixture.root.join(".remote-repo/config.toml"),
             repo_set_config_dir.join("config.toml"),
         )
         .unwrap();
 
         let output = Command::new(env!("CARGO_BIN_EXE_repo-set"))
             .arg("--root")
-            .arg(&fixture.root.join("dest"))
+            .arg(fixture.root.join("dest"))
             .args(debug_args)
-            .args(["--ignore-repo", ignored_repo, "clone"])
+            .arg("clone")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");

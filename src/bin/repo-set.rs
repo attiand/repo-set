@@ -16,7 +16,7 @@ use repo_set::config;
 use repo_set::remote;
 use std::path::PathBuf;
 
-/// Simplify managing a set of git repositories
+/// Manage a set of git repositories
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -24,17 +24,9 @@ struct Cli {
     #[clap(short, long, num_args(1), value_name("DIR"), default_value = ".", value_hint = clap::ValueHint::DirPath)]
     root: PathBuf,
 
-    /// Specify the git remote host, overrides the value specified in the configuration
-    #[clap(long, num_args(1), value_name("HOST"), value_hint = clap::ValueHint::Hostname)]
-    host: Option<String>,
-
-    /// Print debug information
+    /// Print debug information to debug.log in the root directory; repeat to increase detail
     #[arg(long, action = clap::ArgAction::Count)]
     debug: u8,
-
-    /// Repository glob to exclude, may be specified multiple times
-    #[arg(long = "ignore-repo", num_args(1), value_name("REPO-NAME"))]
-    ignore_repos: Vec<String>,
 
     /// Number of worker threads to use, defaults to an I/O-friendly count if not specified.
     #[arg(short, long, default_value_t = 0)]
@@ -55,8 +47,8 @@ enum ListType {
     /// List difference between local and remote repositories
     #[command(name = "--diff", visible_alias = "-d")]
     Diff,
-    /// List superfluous local repositories
-    #[command(name = "--superfluous", visible_alias = "-s")]
+    /// List local repositories that should be removed
+    #[command(name = "--prune", visible_alias = "-p")]
     Superfluous,
 }
 
@@ -153,17 +145,11 @@ fn main() -> Result<()> {
 
     let repo_set_config = repo_set_config::RepoSetConfig::new(&cli.root)?;
     let config = &repo_set_config.common;
-    let configured_url = config.remote_url()?;
     let remote_list_cmd = config.remote_list_cmd()?;
-    let base_url = cli.host.as_deref().unwrap_or(&configured_url);
+    let base_url = config.remote_url()?;
 
-    // --ignore-repos overrides repositories.exclude from the configuration.
-    let exclude = if cli.ignore_repos.is_empty() {
-        &config.repositories.exclude
-    } else {
-        &cli.ignore_repos
-    };
-    let repository_filter = config::RepositoryFilter::new(&config.repositories.include, exclude)?;
+    let repository_filter =
+        config::RepositoryFilter::new(&config.repositories.include, &config.repositories.exclude)?;
 
     let push_options = repo_set_config.push_options();
 
@@ -506,7 +492,7 @@ mod repo_set_config;
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands};
+    use super::{Cli, Commands, ListType};
     use clap::Parser;
 
     #[test]
@@ -519,5 +505,19 @@ mod tests {
     fn clone_command_rejects_repository_arguments_and_all_flag() {
         assert!(Cli::try_parse_from(["repo-set", "clone", "repo-a"]).is_err());
         assert!(Cli::try_parse_from(["repo-set", "clone", "--all"]).is_err());
+        assert!(Cli::try_parse_from(["repo-set", "--host", "ssh://host", "clone"]).is_err());
+    }
+
+    #[test]
+    fn list_prune_option_uses_new_name() {
+        let cli = Cli::try_parse_from(["repo-set", "list", "--prune"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::List {
+                mode: Some(ListType::Superfluous)
+            }
+        ));
+        assert!(Cli::try_parse_from(["repo-set", "list", "--prune-list"]).is_err());
+        assert!(Cli::try_parse_from(["repo-set", "list", "--superfluous"]).is_err());
     }
 }

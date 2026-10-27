@@ -1,33 +1,28 @@
-# repo-clone
+# remote-repo
 
-Clones one or several Git repos.
+List or clones one or several Git repos.
 
-## Usage
+Sub commands:
 
-```bash
-repo-clone repo1 repo2
-repo-clone --all
-```
+## list
 
-Specify one or more repository names, or use `--all` to select all remote
-repositories allowed by configuration.
+List all remote repos.
 
-The include and exclude patterns also apply to explicitly named repositories.
-Existing destination paths are skipped. After each successful clone,
-`clone.post.cmd` runs if configured. Listing, cloning, or post-clone failures
-exit with an error.
+## clone
+
+Clone one or several remote repositories to root. The repo list allows globs.
 
 # Configuration file
 
-`repo-clone` reads a configuration file `.repo-clone/config.toml` in the user's
+`remote-repo` reads a configuration file `.remote-repo/config.toml` in the user's
 home directory.
 
 |Key                  |Mandatory |Description                                    |
 |---------------------|----------|-----------------------------------------------|
 |remote.url           |yes       |The git remote URL                             |
 |remote.list.cmd      |yes       |A command to run to get a list of remote repos |
-|repositories.include |no        |Repos to include; defaults to all              |
-|repositories.exclude |no        |Repos to exclude; defaults to none             |
+|repositories.include |no |Glob patterns selecting repositories; defaults to all      |
+|repositories.exclude |no |Glob patterns excluding repositories; defaults to none    |
 |clone.post.cmd       |no        |A command to run after each clone              |
 
 ## Variables
@@ -68,5 +63,5 @@ exclude = ["*-archive"]
 
 [clone]
 # Add commit hook
-post.cmd = [ "cp", "${home}/.repo-clone/commit-msg", "${dest}/.git/hooks/commit-msg" ]
+post.cmd = [ "cp", "${home}/.remote-repo/commit-msg", "${dest}/.git/hooks/commit-msg" ]
 ```

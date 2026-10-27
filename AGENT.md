@@ -11,7 +11,7 @@ are handled by Clap.
 directory. A single command (clone, pull, fetch, push, status, reset, clean, stage, commit)
 operates on every repository in the set. 
 
-`repo-clone` simply clones one or several Git repositories.
+`remote-repo` simply list or clone one or several Git repositories.
 
 ## Build & run
 
@@ -32,7 +32,7 @@ for a description and examples.
 
 - `bin/repo-set.rs` — CLI definition (clap derive) and command dispatch for `repo-set`
 - `bin/repo-set/config.rs - Extends config.rs and add config settings for `repo-set`
-- `bin/repo-clone.rs` — CLI definition (clap derive) and command dispatch for `repo-clone
+- `bin/remote-repo.rs` — CLI definition (clap derive) and command dispatch for `remote-repo`
 - `lib.rs` — exposes shared modules to both binaries.
 - `config.rs` — shared configuration and configuration file loading.
 - `bin/repo-set/config.rs` — private `RepoSetConfig` and push options.
@@ -50,3 +50,4 @@ for a description and examples.
 - Keep comments to a single line that states what the code cannot show on its
   own; do not restate what the next line does.
 - Verify changes with `cargo build` (and `cargo clippy`) before finishing.
+- Keep documentation short and concise
