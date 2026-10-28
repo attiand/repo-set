@@ -25,7 +25,7 @@ struct Cli {
     root: PathBuf,
 
     /// Print debug information to debug.log in the root directory; repeat to increase detail
-    #[arg(long, action = clap::ArgAction::Count)]
+    #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
 
     /// Number of worker threads to use, defaults to an I/O-friendly count if not specified.

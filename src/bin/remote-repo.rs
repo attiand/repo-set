@@ -31,11 +31,11 @@ struct Cli {
     root: PathBuf,
 
     /// Override the configured remote URL for cloning
-    #[arg(long, value_name = "HOST", value_hint = clap::ValueHint::Hostname)]
+    #[arg(long, global = true, value_name = "HOST", value_hint = clap::ValueHint::Hostname)]
     host: Option<String>,
 
     /// Print debug information to debug.log in the root directory; repeat to increase detail
-    #[arg(long, global = true, action = clap::ArgAction::Count)]
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     debug: u8,
 
     /// Number of worker threads; defaults to an I/O-friendly count
