@@ -4,14 +4,12 @@ Guidance for AI coding agents working in this repository.
 
 ## Project
 
-The project produces two Rust CLI applications. Git operations use `git2` (libgit2). CLI arguments
-are handled by Clap.
+The project produces two Rust CLI applications. Git operations use `git2` (libgit2). CLI arguments are handled by Clap.
 
-`repo-set` manages a set of git repositories under a root
-directory. A single command (clone, pull, fetch, push, status, reset, clean, stage, commit)
-operates on every repository in the set. 
+`repo-set` manages a set of git repositories under a root directory. A single command (clone, pull, fetch, push, status, reset, clean, stage, commit) operates on every
+repository in the set. 
 
-`remote-repo` simply list or clone one or several Git repositories.
+`remote-repo` simply list or clone one or several remote Git repositories.
 
 ## Build & run
 
@@ -33,6 +31,7 @@ for a description and examples.
 - `bin/repo-set.rs` — CLI definition (clap derive) and command dispatch for `repo-set`
 - `bin/repo-set/config.rs - Extends config.rs and add config settings for `repo-set`
 - `bin/remote-repo.rs` — CLI definition (clap derive) and command dispatch for `remote-repo`
+- `bin/remote-repo/config.rs - Extends config.rs and add config settings for `remote-repo`
 - `lib.rs` — exposes shared modules to both binaries.
 - `config.rs` — shared configuration and configuration file loading.
 - `bin/repo-set/config.rs` — private `RepoSetConfig` and push options.

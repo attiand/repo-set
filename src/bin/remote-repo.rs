@@ -30,6 +30,10 @@ struct Cli {
     #[arg(short, long, global = true, default_value = ".", value_name = "DIR", value_hint = clap::ValueHint::DirPath)]
     root: PathBuf,
 
+    /// Override the configured remote URL for cloning
+    #[arg(long, value_name = "HOST", value_hint = clap::ValueHint::Hostname)]
+    host: Option<String>,
+
     /// Print debug information to debug.log in the root directory; repeat to increase detail
     #[arg(long, global = true, action = clap::ArgAction::Count)]
     debug: u8,
@@ -47,21 +51,17 @@ enum Commands {
     /// Clone one or several Git repositories
     #[clap(alias = "c")]
     Clone {
-        /// Override the configured remote URL for cloning
-        #[arg(long, value_name = "HOST", value_hint = clap::ValueHint::Hostname)]
-        host: Option<String>,
-
         /// Repository names or glob patterns to clone
         #[arg(value_name = "REPO-NAME", num_args = 1.., required_unless_present = "all",
             add = ArgValueCompleter::new(complete_repositories))]
         repos: Vec<String>,
 
-        /// Clone all remote repositories allowed by include/exclude patterns
+        /// Clone all remote repositories allowed by configuration
         #[arg(long, conflicts_with = "repos")]
         all: bool,
     },
 
-    /// List remote repositories allowed by include/exclude patterns
+    /// List remote repositories allowed by configuration
     #[clap(alias = "l")]
     List,
 
@@ -135,9 +135,9 @@ fn main() -> Result<()> {
                 println!("{repo}");
             }
         }
-        Commands::Clone { host, repos, all } => {
+        Commands::Clone { repos, all } => {
             let configured_url = config.remote_url()?;
-            let base_url = host.as_deref().unwrap_or(&configured_url);
+            let base_url = &cli.host.as_deref().unwrap_or(&configured_url);
             let remote = remote::Remote::new(
                 &list_cmd,
                 &config.clone.post.cmd,

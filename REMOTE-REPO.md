@@ -65,5 +65,5 @@ exclude = ["*-archive"]
 
 [clone]
 # Add commit hook
-post.cmd = [ "cp", "${home}/.remote-repo/commit-msg", "${dest}/.git/hooks/commit-msg" ]
+post.cmd = [ "cp", "${home}/.remote-repo/commit-msg", "${dest}/.git/hooks" ]
 ```

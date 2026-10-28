@@ -114,7 +114,7 @@ exclude = ["*-archive"]
 
 [clone]
 # Add commit hook
-post.cmd = [ "cp", "${root}/.repo-set/commit-msg", "${dest}/.git/hooks/commit-msg" ]
+post.cmd = [ "cp", "${root}/.repo-set/commit-msg", "${dest}/.git/hooks" ]
 
 [push.options]
 # Always vote +2
