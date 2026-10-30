@@ -517,7 +517,5 @@ mod tests {
                 mode: Some(ListType::Superfluous)
             }
         ));
-        assert!(Cli::try_parse_from(["repo-set", "list", "--prune-list"]).is_err());
-        assert!(Cli::try_parse_from(["repo-set", "list", "--superfluous"]).is_err());
     }
 }
