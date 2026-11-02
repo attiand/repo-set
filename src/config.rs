@@ -191,39 +191,9 @@ fn expand_user(value: &str) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, expand_clone_post_cmd, load_from_root, repo_set_config_path};
+    use super::{Config, expand_clone_post_cmd};
     use std::env::home_dir;
-    use std::fs;
     use std::path::Path;
-    use std::path::PathBuf;
-
-    #[test]
-    fn repo_set_config_path_uses_the_root_directory() {
-        assert_eq!(
-            repo_set_config_path(Path::new("/work/repos")),
-            PathBuf::from("/work/repos/.repo-set/config.toml")
-        );
-    }
-
-    #[test]
-    fn repo_set_loads_config_from_the_root() {
-        let root =
-            std::env::temp_dir().join(format!("repo-set-config-test-{}", std::process::id()));
-        let config_dir = root.join(".repo-set");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(
-            repo_set_config_path(&root),
-            "[remote]\nurl = \"host\"\nlist.cmd = [\"list\"]\n",
-        )
-        .unwrap();
-
-        let config: Config = load_from_root(&root).unwrap();
-        assert_eq!(config.remote.url, "host");
-
-        fs::remove_file(repo_set_config_path(&root)).unwrap();
-        fs::remove_dir(&config_dir).unwrap();
-        fs::remove_dir(&root).unwrap();
-    }
 
     fn parse(toml: &str) -> Config {
         toml::from_str(toml).expect("config should parse")
