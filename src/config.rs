@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use glob::Pattern;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{env::home_dir, fs};
 
 #[derive(Deserialize)]
@@ -110,7 +110,7 @@ impl From<FileConfig> for Config {
 
 impl Config {
     pub fn new(root: &Path) -> anyhow::Result<Self> {
-        load_from_root(root)
+        load_from_path(root)
     }
 
     pub fn remote_url(&self) -> anyhow::Result<String> {
@@ -127,10 +127,6 @@ impl Config {
     }
 }
 
-pub fn load_from_root<T: DeserializeOwned>(root: &Path) -> anyhow::Result<T> {
-    load_config(&repo_set_config_path(root))
-}
-
 pub fn load_from_path<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
     load_config(path)
 }
@@ -142,10 +138,6 @@ fn load_config<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
 
     let content: String = fs::read_to_string(path)?;
     toml::from_str(content.as_str()).map_err(|e| anyhow!("{}: {}", path.display(), e))
-}
-
-fn repo_set_config_path(root: &Path) -> PathBuf {
-    root.join(".repo-set").join("config.toml")
 }
 
 pub fn expand_clone_post_cmd(

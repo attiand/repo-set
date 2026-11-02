@@ -73,7 +73,7 @@ impl From<FileConfig> for RepoSetConfig {
 
 impl RepoSetConfig {
     pub fn new(root: &Path) -> anyhow::Result<Self> {
-        config::load_from_root(root)
+        config::load_from_path(root)
     }
 
     pub fn push_options(&self) -> Vec<String> {
