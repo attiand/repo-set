@@ -1,3 +1,4 @@
+use anyhow::Context;
 use git2::Repository;
 use repo_set::config::RepositoryFilter;
 use std::fs;
@@ -84,7 +85,7 @@ impl<'a> Local<'a> {
             )?;
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
         let object = match target {
             Some(rev) => repo.revparse_single(rev)?.peel_to_commit()?,
             None => repo.head()?.peel_to_commit()?,
@@ -97,7 +98,7 @@ impl<'a> Local<'a> {
     /// Whether there are tracked modifications or deletions that
     /// `stage --update` would add to the index. Untracked files don't count.
     pub fn has_stageable(&self, dst: &Path) -> anyhow::Result<bool> {
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
 
         let mut opts = git2::StatusOptions::new();
         opts.include_untracked(false);
@@ -126,7 +127,7 @@ impl<'a> Local<'a> {
             )?;
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
         let mut index = repo.index()?;
         index.update_all(["*"].iter(), None)?;
         index.write()?;
@@ -137,7 +138,7 @@ impl<'a> Local<'a> {
     /// Whether the index holds staged changes relative to HEAD, i.e. there is
     /// something for `commit` to record.
     pub fn has_staged(&self, dst: &Path) -> anyhow::Result<bool> {
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
 
         let mut opts = git2::StatusOptions::new();
         opts.include_untracked(false);
@@ -164,7 +165,7 @@ impl<'a> Local<'a> {
             repo_set::debug::log(self.root, &format!("[debug] commit {}", dst.display()))?;
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
         let mut index = repo.index()?;
         let tree = repo.find_tree(index.write_tree()?)?;
         let parent = repo.head()?.peel_to_commit()?;
@@ -221,9 +222,11 @@ impl<'a> Local<'a> {
         for rel in self.clean_list(dst)? {
             let full = dst.join(&rel);
             if full.is_dir() {
-                fs::remove_dir_all(&full)?;
+                fs::remove_dir_all(&full)
+                    .with_context(|| format!("Failed to remove directory {}", full.display()))?;
             } else if full.exists() {
-                fs::remove_file(&full)?;
+                fs::remove_file(&full)
+                    .with_context(|| format!("Failed to remove file {}", full.display()))?;
             }
         }
 
@@ -233,7 +236,7 @@ impl<'a> Local<'a> {
     /// Return the working tree status as `git status --short` entries. An empty
     /// vector means the working tree is clean.
     pub fn status_short(&self, dst: &Path) -> anyhow::Result<Vec<FileStatus>> {
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
 
         let mut opts = git2::StatusOptions::new();
         opts.include_untracked(true).recurse_untracked_dirs(true);
@@ -249,6 +252,10 @@ impl<'a> Local<'a> {
 
         Ok(entries)
     }
+}
+
+fn open_repository(dst: &Path) -> anyhow::Result<Repository> {
+    Repository::open(dst).with_context(|| format!("Failed to open repository {}", dst.display()))
 }
 
 /// Run the repository's `commit-msg` hook (if present) on `message`, returning

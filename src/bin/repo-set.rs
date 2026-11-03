@@ -203,7 +203,7 @@ fn main() -> Result<()> {
                     remote
                         .clone(repo_url.as_ref(), dest.as_path())
                         .err()
-                        .map(|e| e.to_string())
+                        .map(|e| format!("{e:#}"))
                 };
 
                 sender
@@ -241,7 +241,7 @@ fn main() -> Result<()> {
                     })
                     .unwrap();
 
-                let error = remote.pull(dest.as_path()).err().map(|e| e.to_string());
+                let error = remote.pull(dest.as_path()).err().map(|e| format!("{e:#}"));
 
                 sender
                     .send(progress::Update::Finish { slot, error })
@@ -272,7 +272,7 @@ fn main() -> Result<()> {
                     })
                     .unwrap();
 
-                let error = remote.fetch(dest.as_path()).err().map(|e| e.to_string());
+                let error = remote.fetch(dest.as_path()).err().map(|e| format!("{e:#}"));
 
                 sender
                     .send(progress::Update::Finish { slot, error })
@@ -318,8 +318,8 @@ fn main() -> Result<()> {
                     Ok(true) => remote
                         .push(dest.as_path(), refspec, &options)
                         .err()
-                        .map(|e| e.to_string()),
-                    Err(e) => Some(e.to_string()),
+                        .map(|e| format!("{e:#}")),
+                    Err(e) => Some(format!("{e:#}")),
                 };
 
                 sender
@@ -355,7 +355,7 @@ fn main() -> Result<()> {
                 let error = local
                     .reset_hard(dest.as_path(), commit.as_deref())
                     .err()
-                    .map(|e| e.to_string());
+                    .map(|e| format!("{e:#}"));
 
                 sender
                     .send(progress::Update::Finish { slot, error })
@@ -387,7 +387,7 @@ fn main() -> Result<()> {
                     })
                     .unwrap();
 
-                let error = local.clean(dest.as_path()).err().map(|e| e.to_string());
+                let error = local.clean(dest.as_path()).err().map(|e| format!("{e:#}"));
 
                 sender
                     .send(progress::Update::Finish { slot, error })
@@ -426,8 +426,8 @@ fn main() -> Result<()> {
                     Ok(true) => local
                         .stage_update(dest.as_path())
                         .err()
-                        .map(|e| e.to_string()),
-                    Err(e) => Some(e.to_string()),
+                        .map(|e| format!("{e:#}")),
+                    Err(e) => Some(format!("{e:#}")),
                 };
 
                 sender
@@ -468,8 +468,8 @@ fn main() -> Result<()> {
                     Ok(true) => local
                         .commit(dest.as_path(), message)
                         .err()
-                        .map(|e| e.to_string()),
-                    Err(e) => Some(e.to_string()),
+                        .map(|e| format!("{e:#}")),
+                    Err(e) => Some(format!("{e:#}")),
                 };
 
                 sender

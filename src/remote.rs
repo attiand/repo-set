@@ -1,5 +1,5 @@
 use crate::config::RepositoryFilter;
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use git2::{RemoteCallbacks, Repository};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -131,8 +131,9 @@ impl<'a> Remote<'a> {
             crate::debug::log(self.root, &format!("[debug] fetch {}", dst.display()))?;
         }
 
-        let repo = Repository::open(dst)?;
-        self.fetch_origin(&repo, dst)?;
+        let repo = open_repository(dst)?;
+        self.fetch_origin(&repo, dst)
+            .with_context(|| format!("Failed to fetch repository {}", dst.display()))?;
         Ok(())
     }
 
@@ -141,17 +142,26 @@ impl<'a> Remote<'a> {
             crate::debug::log(self.root, &format!("[debug] pull {}", dst.display()))?;
         }
 
-        let repo = Repository::open(dst)?;
-        let head = repo.head()?;
+        let repo = open_repository(dst)?;
+        let head = repo
+            .head()
+            .with_context(|| format!("Failed to read HEAD in {}", dst.display()))?;
         if !head.is_branch() {
-            return Err(anyhow!("HEAD is detached, nothing to pull"));
+            return Err(anyhow!(
+                "HEAD is detached in {}, nothing to pull",
+                dst.display()
+            ));
         }
-        let branch = head.shorthand()?.to_string();
+        let branch = head
+            .shorthand()
+            .with_context(|| format!("Failed to read branch in {}", dst.display()))?
+            .to_string();
 
         let output = Command::new("git")
             .args(["pull", "--ff-only", "origin", branch.as_str()])
             .current_dir(dst)
-            .output()?;
+            .output()
+            .with_context(|| format!("Failed to start git pull in {}", dst.display()))?;
 
         if self.debug > 0 {
             crate::debug::log_bytes(self.root, "[debug] git pull stdout:\n", &output.stdout)?;
@@ -160,7 +170,11 @@ impl<'a> Remote<'a> {
 
         if !output.status.success() {
             let detail = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("git pull failed: {}", detail.trim()));
+            return Err(anyhow!(
+                "git pull in {} failed: {}",
+                dst.display(),
+                detail.trim()
+            ));
         }
 
         Ok(())
@@ -197,7 +211,7 @@ impl<'a> Remote<'a> {
     /// Whether the current branch has local commits ahead of its upstream
     /// tracking branch. Branches with no upstream are considered not ahead.
     pub fn has_unpushed(&self, dst: &Path) -> anyhow::Result<bool> {
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
 
         let head = repo.head()?;
         if !head.is_branch() {
@@ -229,7 +243,7 @@ impl<'a> Remote<'a> {
             )?;
         }
 
-        let repo = Repository::open(dst)?;
+        let repo = open_repository(dst)?;
 
         let mut remote = repo.find_remote("origin")?;
 
@@ -272,6 +286,40 @@ impl<'a> Remote<'a> {
         }
 
         Ok(())
+    }
+}
+
+fn open_repository(dst: &Path) -> anyhow::Result<Repository> {
+    Repository::open(dst).with_context(|| format!("Failed to open repository {}", dst.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Remote;
+    use crate::config::RepositoryFilter;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn pull_reports_the_path_when_the_repository_cannot_be_opened() {
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "repo-set-pull-error-{}-{}",
+            std::process::id(),
+            NEXT_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::write(&path, "not a repository").unwrap();
+
+        let filter = RepositoryFilter::new(&[], &[]).unwrap();
+        let remote = Remote::new(&[], &[], path.parent().unwrap(), &filter, 0);
+        let error = remote.pull(&path).unwrap_err();
+        let message = format!("{error:#}");
+
+        fs::remove_file(&path).unwrap();
+        assert!(message.contains("Failed to open repository"), "{message}");
+        assert!(message.contains(&path.display().to_string()), "{message}");
     }
 }
 
