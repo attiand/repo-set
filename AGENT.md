@@ -30,6 +30,7 @@ for a description and examples.
 
 - `bin/repo-set.rs` — CLI definition (clap derive) and command dispatch for `repo-set`
 - `bin/repo-set/config.rs - Extends config.rs and add config settings for `repo-set`
+- `bin/repo-set/collection_config.rs` - Handles the `collection.toml` configuration.
 - `bin/remote-repo.rs` — CLI definition (clap derive) and command dispatch for `remote-repo`
 - `bin/remote-repo/config.rs - Extends config.rs and add config settings for `remote-repo`
 - `lib.rs` — exposes shared modules to both binaries.

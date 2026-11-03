@@ -73,7 +73,7 @@ impl From<FileConfig> for RepoSetConfig {
 
 impl RepoSetConfig {
     pub fn new(root: &Path) -> anyhow::Result<Self> {
-        config::load_from_path(root)
+        config::load_from_path(&root.join(".repo-set/config.toml"))
     }
 
     pub fn push_options(&self) -> Vec<String> {

@@ -68,6 +68,8 @@ Print help information.
 `repo-set` reads the configuration file `.repo-set/config.toml` in the root
 directory specified by `--root` (the current directory by default).
 
+## Set Settings
+
 |Key                  |Mandatory |Description                                           |
 |---------------------|----------|------------------------------------------------------|
 |remote.url           |yes       |The git remote URL                                    |
@@ -89,6 +91,19 @@ There are limited variable expansion support:
 |dest  |clone.post.cmd              |The abs path to the local repo   |
 |home  |clone.post.cmd              |The current user's home directory|
 |root  |clone.post.cmd              |The absolute path to the root directory|
+
+
+## Collections
+
+To operate on several sets, create `.repo-set/collection.toml` in the root:
+
+```toml
+collection = ["set-a", "set-b"]
+```
+
+Entries are paths relative to the collection root; absolute paths are also
+accepted. Each entry is a set root with its own `.repo-set/config.toml`, such as
+`set-a/.repo-set/config.toml` and `set-b/.repo-set/config.toml`.
 
 
 ## Minimal example

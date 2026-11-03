@@ -4,9 +4,14 @@ mod local;
 mod pool;
 #[path = "../status.rs"]
 mod status;
-
 #[path = "../progress.rs"]
 mod progress;
+
+#[path = "repo-set/collection_config.rs"]
+mod collection_config;
+#[path = "repo-set/config.rs"]
+mod repo_set_config;
+
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
@@ -125,7 +130,7 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
 
     if let Commands::Init = &cli.command {
         let path = repo_set_config::init(&cli.root)?;
@@ -143,6 +148,18 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(roots) = collection_config::roots(&cli.root)? {
+        for root in roots {
+            cli.root = root;
+            run(&cli)?;
+        }
+    } else {
+        run(&cli)?;
+    }
+    Ok(())
+}
+
+fn run(cli: &Cli) -> Result<()> {
     let repo_set_config = repo_set_config::RepoSetConfig::new(&cli.root)?;
     let config = &repo_set_config.common;
     let remote_list_cmd = config.remote_list_cmd()?;
@@ -487,8 +504,6 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-#[path = "repo-set/config.rs"]
-mod repo_set_config;
 
 #[cfg(test)]
 mod tests {

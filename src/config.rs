@@ -136,7 +136,8 @@ fn load_config<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
         return Err(anyhow!("No config file found at {}", path.display()));
     }
 
-    let content: String = fs::read_to_string(path)?;
+    let content: String = fs::read_to_string(path)
+        .map_err(|error| anyhow!("Failed to read config file {}: {error}", path.display()))?;
     toml::from_str(content.as_str()).map_err(|e| anyhow!("{}: {}", path.display(), e))
 }
 
@@ -193,6 +194,7 @@ fn expand_user(value: &str) -> anyhow::Result<String> {
 mod tests {
     use super::{Config, expand_clone_post_cmd};
     use std::env::home_dir;
+    use std::fs;
     use std::path::Path;
 
     fn parse(toml: &str) -> Config {
@@ -315,6 +317,24 @@ mod tests {
     fn missing_url_fails() {
         let result = toml::from_str::<Config>("repositories.unknown = [\"a\"]");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn config_read_error_reports_path_and_cause() {
+        let path =
+            std::env::temp_dir().join(format!("repo-set-config-directory-{}", std::process::id()));
+        fs::create_dir(&path).unwrap();
+
+        let error = match super::load_config::<Config>(&path) {
+            Ok(_) => panic!("expected a directory path to fail as a config file"),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+
+        fs::remove_dir(&path).unwrap();
+        assert!(message.contains("Failed to read config file"), "{message}");
+        assert!(message.contains(&path.display().to_string()), "{message}");
+        assert!(message.contains("Is a directory"), "{message}");
     }
 
     #[test]
