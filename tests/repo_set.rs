@@ -26,13 +26,17 @@ impl Drop for Fixture {
 }
 
 fn create_dirty_set(root: &std::path::Path) -> PathBuf {
+    create_dirty_set_named(root, "repo")
+}
+
+fn create_dirty_set_named(root: &std::path::Path, name: &str) -> PathBuf {
     fs::create_dir_all(root.join(".repo-set")).unwrap();
     fs::write(
         root.join(".repo-set/config.toml"),
         "remote.url = 'unused'\nremote.list.cmd = ['unused']\n",
     )
     .unwrap();
-    let path = root.join("repo");
+    let path = root.join(name);
     let repo = git2::Repository::init(&path).unwrap();
     fs::write(path.join("tracked"), "original").unwrap();
     let mut index = repo.index().unwrap();
@@ -95,6 +99,89 @@ fn stage_update_stages_tracked_changes_and_leaves_untracked_files() {
         status.contains("\x1b[31m?\x1b[0m\x1b[31m?\x1b[0m untracked"),
         "{status:?}"
     );
+}
+
+fn create_pushable_repo(root: &std::path::Path, name: &str) -> (git2::Repository, git2::Oid) {
+    let path = create_dirty_set_named(root, name);
+    let destination_path = root.join(format!(".{name}-destination.git"));
+    let destination = git2::Repository::init_bare(&destination_path).unwrap();
+    let repo = git2::Repository::open(&path).unwrap();
+    repo.remote("review", destination_path.to_str().unwrap())
+        .unwrap();
+    let head = repo.head().unwrap();
+    let branch_name = head.shorthand().unwrap();
+    let parent = head.peel_to_commit().unwrap();
+    repo.reference(
+        &format!("refs/remotes/review/{branch_name}"),
+        parent.id(),
+        true,
+        "initial upstream",
+    )
+    .unwrap();
+    repo.find_branch(branch_name, git2::BranchType::Local)
+        .unwrap()
+        .set_upstream(Some(&format!("review/{branch_name}")))
+        .unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("tracked")).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+    let commit = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "local change",
+            &tree,
+            &[&parent],
+        )
+        .unwrap();
+    (destination, commit)
+}
+
+#[test]
+fn push_uses_the_requested_repository() {
+    let fixture = Fixture::new();
+    let (destination, commit) = create_pushable_repo(&fixture.0, "repo");
+    let output = Command::new(env!("CARGO_BIN_EXE_repo-set"))
+        .current_dir(&fixture.0)
+        .args(["push", "review", "HEAD:refs/heads/pushed"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        destination
+            .find_reference("refs/heads/pushed")
+            .unwrap()
+            .target(),
+        Some(commit)
+    );
+}
+
+#[test]
+fn push_sleep_delays_between_repositories() {
+    let fixture = Fixture::new();
+    let first = create_pushable_repo(&fixture.0, "first");
+    let second = create_pushable_repo(&fixture.0, "second");
+    create_dirty_set_named(&fixture.0, "skipped");
+    let start = std::time::Instant::now();
+    let output = Command::new(env!("CARGO_BIN_EXE_repo-set"))
+        .current_dir(&fixture.0)
+        .args(["push", "--sleep=200ms", "review", "HEAD:refs/heads/pushed"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(start.elapsed() >= std::time::Duration::from_millis(200));
+    for (destination, commit) in [first, second] {
+        assert_eq!(
+            destination
+                .find_reference("refs/heads/pushed")
+                .unwrap()
+                .target(),
+            Some(commit)
+        );
+    }
 }
 
 #[test]

@@ -49,14 +49,18 @@ Commit local repositories with staged changes.
 
 ## push
 
-Push local repos that is ahead of its tracking branch.
+Push local repos that are ahead of their tracking branch. A remote repository
+name and refspec are required.
+
+It is possible to tell the app to sleep a while between pushes to give the CI/CD
+pipelines some slack.
 
 ### Example
 
 Push options:
 
 ```bash
-repo-set push --push-option='m=#AS' HEAD:refs/for/master
+repo-set push --sleep=1s --push-option='m=#AS' origin HEAD:refs/for/master
 ```
 
 ## help

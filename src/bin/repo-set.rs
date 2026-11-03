@@ -78,6 +78,10 @@ enum Commands {
     Fetch,
     /// Push local repositories that are ahead of their tracking branch
     Push {
+        /// Remote repository name, for example origin
+        #[arg(value_name = "REPOSITORY")]
+        repository: String,
+
         /// Refspec to push, for example HEAD:refs/heads/master
         #[arg(value_name = "REFSPEC")]
         refspec: String,
@@ -86,6 +90,10 @@ enum Commands {
         /// merged with the options from the configuration
         #[arg(long = "push-option", num_args(1), value_name = "OPTION")]
         push_option_cmd: Vec<String>,
+
+        /// Delay between push attempts, for example 1s or 250ms
+        #[arg(long, value_name = "DURATION", default_value = "0s", value_parser = humantime::parse_duration)]
+        sleep: std::time::Duration,
     },
     /// List local repositories with an unclean working tree (git status --short)
     #[clap(alias = "s")]
@@ -300,8 +308,10 @@ fn run(cli: &Cli) -> Result<()> {
             consumer.join().unwrap()?;
         }
         Commands::Push {
+            repository,
             refspec,
             push_option_cmd,
+            sleep,
         } => {
             let local_repos = local.repos(&cli.root)?;
 
@@ -311,10 +321,11 @@ fn run(cli: &Cli) -> Result<()> {
 
             let (sender, receiver) = unbounded::<progress::Update>();
 
-            let workers = pool::worker_count(cli.threads, local_repos.len());
-            let consumer = progress::create_writer(receiver, local_repos.len(), workers, "Pushing");
+            let consumer = progress::create_writer(receiver, local_repos.len(), 1, "Pushing");
 
-            pool::for_each_io(&local_repos, cli.threads, |slot, r| {
+            let mut pushed = false;
+            for r in &local_repos {
+                let slot = 0;
                 let mut dest = cli.root.clone();
                 dest.push(r);
 
@@ -332,17 +343,23 @@ fn run(cli: &Cli) -> Result<()> {
 
                 let error = match unpushed {
                     Ok(false) => None,
-                    Ok(true) => remote
-                        .push(dest.as_path(), refspec, &options)
-                        .err()
-                        .map(|e| format!("{e:#}")),
+                    Ok(true) => {
+                        if pushed && !sleep.is_zero() {
+                            std::thread::sleep(*sleep);
+                        }
+                        pushed = true;
+                        remote
+                            .push(dest.as_path(), repository, refspec, &options)
+                            .err()
+                            .map(|e| format!("{e:#}"))
+                    }
                     Err(e) => Some(format!("{e:#}")),
                 };
 
                 sender
                     .send(progress::Update::Finish { slot, error })
                     .unwrap();
-            });
+            }
 
             drop(sender); // close the channel so the progress writer finishes
             consumer.join().unwrap()?;
@@ -521,6 +538,75 @@ mod tests {
         assert!(Cli::try_parse_from(["repo-set", "clone", "repo-a"]).is_err());
         assert!(Cli::try_parse_from(["repo-set", "clone", "--all"]).is_err());
         assert!(Cli::try_parse_from(["repo-set", "--host", "ssh://host", "clone"]).is_err());
+    }
+
+    #[test]
+    fn push_requires_repository_and_refspec() {
+        for args in [
+            vec!["repo-set", "push"],
+            vec!["repo-set", "push", "HEAD:refs/for/master"],
+            vec!["repo-set", "push", "origin"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+        let cli = Cli::try_parse_from([
+            "repo-set",
+            "push",
+            "--push-option=m=#AS",
+            "origin",
+            "HEAD:refs/for/master",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Push {
+                repository,
+                refspec,
+                push_option_cmd,
+                sleep,
+            } => {
+                assert_eq!(repository, "origin");
+                assert_eq!(refspec, "HEAD:refs/for/master");
+                assert_eq!(push_option_cmd, ["m=#AS"]);
+                assert!(sleep.is_zero());
+            }
+            _ => panic!("expected push command"),
+        }
+    }
+
+    #[test]
+    fn push_sleep_parses_durations_and_rejects_invalid_values() {
+        for (value, expected) in [
+            ("1s", std::time::Duration::from_secs(1)),
+            ("250ms", std::time::Duration::from_millis(250)),
+            ("0s", std::time::Duration::ZERO),
+        ] {
+            let cli = Cli::try_parse_from([
+                "repo-set",
+                "push",
+                "--sleep",
+                value,
+                "origin",
+                "HEAD:refs/for/master",
+            ])
+            .unwrap();
+            match cli.command {
+                Commands::Push { sleep, .. } => assert_eq!(sleep, expected),
+                _ => panic!("expected push command"),
+            }
+        }
+        for value in ["invalid", "-1s", "1"] {
+            assert!(
+                Cli::try_parse_from([
+                    "repo-set",
+                    "push",
+                    "--sleep",
+                    value,
+                    "origin",
+                    "HEAD:refs/for/master",
+                ])
+                .is_err()
+            );
+        }
     }
 
     #[test]

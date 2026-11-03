@@ -234,18 +234,24 @@ impl<'a> Remote<'a> {
         Ok(ahead > 0)
     }
 
-    /// Push `refspec` to `origin`, sending `push_options` as git push options.
-    pub fn push(&self, dst: &Path, refspec: &str, push_options: &[String]) -> anyhow::Result<()> {
+    /// Push `refspec` to `repository`, sending `push_options` as git push options.
+    pub fn push(
+        &self,
+        dst: &Path,
+        repository: &str,
+        refspec: &str,
+        push_options: &[String],
+    ) -> anyhow::Result<()> {
         if self.debug > 0 {
             crate::debug::log(
                 self.root,
-                &format!("[debug] push {} {}", refspec, dst.display()),
+                &format!("[debug] push {} {} {}", repository, refspec, dst.display()),
             )?;
         }
 
         let repo = open_repository(dst)?;
 
-        let mut remote = repo.find_remote("origin")?;
+        let mut remote = repo.find_remote(repository)?;
 
         // libgit2 does not fail the push when the server rejects a ref, so we
         // collect per-ref status here and turn it into an error afterwards.
