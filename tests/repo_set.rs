@@ -48,6 +48,56 @@ fn create_dirty_set(root: &std::path::Path) -> PathBuf {
 }
 
 #[test]
+fn stage_update_stages_tracked_changes_and_leaves_untracked_files() {
+    let fixture = Fixture::new();
+    let path = create_dirty_set(&fixture.0);
+    fs::write(path.join("untracked"), "new").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_repo-set"))
+        .current_dir(&fixture.0)
+        .args(["stage", "-u"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let repo = git2::Repository::open(&path).unwrap();
+    assert_eq!(
+        repo.status_file(std::path::Path::new("tracked")).unwrap(),
+        git2::Status::INDEX_MODIFIED
+    );
+    assert_eq!(
+        repo.status_file(std::path::Path::new("untracked")).unwrap(),
+        git2::Status::WT_NEW
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_repo-set"))
+        .current_dir(&fixture.0)
+        .arg("status")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let status = String::from_utf8(output.stdout).unwrap();
+    assert!(status.contains("  M  tracked"), "{status}");
+    assert!(!status.contains("   M tracked"), "{status}");
+
+    fs::write(path.join("tracked"), "modified again").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_repo-set"))
+        .current_dir(&fixture.0)
+        .env("CLICOLOR_FORCE", "1")
+        .env_remove("NO_COLOR")
+        .arg("status")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let status = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        status.contains("\x1b[32mM\x1b[0m\x1b[31mM\x1b[0m tracked"),
+        "{status:?}"
+    );
+    assert!(
+        status.contains("\x1b[31m?\x1b[0m\x1b[31m?\x1b[0m untracked"),
+        "{status:?}"
+    );
+}
+
+#[test]
 fn collection_reset_uses_each_member_root_and_config() {
     let fixture = Fixture::new();
     let root = fixture.0.join("collection");

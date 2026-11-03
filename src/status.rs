@@ -32,9 +32,17 @@ pub fn dirty(local: &Local, root: &Path) -> Result<()> {
             continue;
         }
         println!("{}", style(&repo).bold());
-        entries
-            .iter()
-            .for_each(|e| println!("  {} {}", style(&e.status).red(), e.path));
+        for entry in entries {
+            let mut flags = entry.status.chars();
+            let index = flags.next().unwrap_or(' ');
+            let worktree = flags.next().unwrap_or(' ');
+            let index = if index == '?' {
+                style(index).red()
+            } else {
+                style(index).green()
+            };
+            println!("  {}{} {}", index, style(worktree).red(), entry.path);
+        }
     }
     Ok(())
 }
