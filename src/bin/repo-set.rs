@@ -2,16 +2,15 @@
 mod local;
 #[path = "../pool.rs"]
 mod pool;
-#[path = "../status.rs"]
-mod status;
 #[path = "../progress.rs"]
 mod progress;
+#[path = "../status.rs"]
+mod status;
 
 #[path = "repo-set/collection_config.rs"]
 mod collection_config;
 #[path = "repo-set/config.rs"]
 mod repo_set_config;
-
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
