@@ -1,0 +1,23 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+
+          if [ "$RELEASE_TAG" != "$CARGO_VERSION" ]; then
+            echo "::error::Version mismatch! Release tag ($RELEASE_TAG) does not match Cargo.toml ($CARGO_VERSION)."
+            exit 1
+          fi
