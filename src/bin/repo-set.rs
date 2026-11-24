@@ -90,7 +90,7 @@ enum Commands {
         #[arg(long = "push-option", num_args(1), value_name = "OPTION")]
         push_option_cmd: Vec<String>,
 
-        /// Delay between push attempts, for example 1s or 250ms
+        /// Delay between push attempts, for example 10s or 1m
         #[arg(long, value_name = "DURATION", default_value = "0s", value_parser = humantime::parse_duration)]
         sleep: std::time::Duration,
     },
