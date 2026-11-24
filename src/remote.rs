@@ -152,13 +152,9 @@ impl<'a> Remote<'a> {
                 dst.display()
             ));
         }
-        let branch = head
-            .shorthand()
-            .with_context(|| format!("Failed to read branch in {}", dst.display()))?
-            .to_string();
 
         let output = Command::new("git")
-            .args(["pull", "--ff-only", "origin", branch.as_str()])
+            .arg("pull")
             .current_dir(dst)
             .output()
             .with_context(|| format!("Failed to start git pull in {}", dst.display()))?;
