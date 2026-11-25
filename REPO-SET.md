@@ -25,7 +25,7 @@ Fetch all local repos.
 
 ## pull
 
-Pull all local repos.
+Pull all local repos, pulls with `--ff-only`.
 
 ## reset
 

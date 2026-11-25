@@ -152,29 +152,67 @@ impl<'a> Remote<'a> {
                 dst.display()
             ));
         }
-        let branch = head
-            .shorthand()
+        let branch_ref = head
+            .name()
             .with_context(|| format!("Failed to read branch in {}", dst.display()))?
             .to_string();
+        drop(head);
 
-        let output = Command::new("git")
-            .args(["pull", "--ff-only", "origin", branch.as_str()])
-            .current_dir(dst)
-            .output()
-            .with_context(|| format!("Failed to start git pull in {}", dst.display()))?;
+        self.fast_forward(&repo, dst, &branch_ref)
+            .with_context(|| format!("Failed to pull repository {}", dst.display()))
+    }
 
-        if self.debug > 0 {
-            crate::debug::log_bytes(self.root, "[debug] git pull stdout:\n", &output.stdout)?;
-            crate::debug::log_bytes(self.root, "[debug] git pull stderr:\n", &output.stderr)?;
+    /// Fetch the current branch from `origin` and fast-forward `branch_ref` to it,
+    /// like `git pull --ff-only origin <branch>`.
+    fn fast_forward(&self, repo: &Repository, dst: &Path, branch_ref: &str) -> anyhow::Result<()> {
+        let (branch, fetch_commit) = self.fetch_origin(repo, dst)?;
+        let (analysis, _) = repo.merge_analysis(&[&fetch_commit])?;
+
+        if analysis.is_up_to_date() {
+            if self.debug > 0 {
+                crate::debug::log(
+                    self.root,
+                    &format!("[debug] pull {}: already up to date", dst.display()),
+                )?;
+            }
+            return Ok(());
         }
 
-        if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr);
+        if !analysis.is_fast_forward() {
+            return Err(anyhow!("cannot fast-forward {}, merge required", branch));
+        }
+
+        let target = repo.find_commit(fetch_commit.id())?;
+        let current_tree = repo.head()?.peel_to_tree()?;
+
+        let conflicts = local_changes_in_diff(repo, &current_tree, &target.tree()?)?;
+        if !conflicts.is_empty() {
             return Err(anyhow!(
-                "git pull in {} failed: {}",
-                dst.display(),
-                detail.trim()
+                "local changes to {} would be overwritten by pull, commit or stash them first",
+                conflicts.join(", ")
             ));
+        }
+
+        repo.checkout_tree(
+            target.as_object(),
+            Some(git2::build::CheckoutBuilder::new().safe()),
+        )?;
+
+        repo.find_reference(branch_ref)?.set_target(
+            target.id(),
+            &format!("pull: Fast-forward to {}", target.id()),
+        )?;
+
+        if self.debug > 0 {
+            crate::debug::log(
+                self.root,
+                &format!(
+                    "[debug] pull {}: fast-forwarded {} to {}",
+                    dst.display(),
+                    branch,
+                    target.id()
+                ),
+            )?;
         }
 
         Ok(())
@@ -299,6 +337,35 @@ fn open_repository(dst: &Path) -> anyhow::Result<Repository> {
     Repository::open(dst).with_context(|| format!("Failed to open repository {}", dst.display()))
 }
 
+/// Paths changed between `from` and `to` that have staged, unstaged or untracked
+/// local changes. Like `git pull`, such files block the update even when their
+/// content already matches `to`; ignored files may be overwritten.
+fn local_changes_in_diff(
+    repo: &Repository,
+    from: &git2::Tree,
+    to: &git2::Tree,
+) -> anyhow::Result<Vec<String>> {
+    let diff = repo.diff_tree_to_tree(Some(from), Some(to), None)?;
+    let paths: std::collections::BTreeSet<&Path> = diff
+        .deltas()
+        .flat_map(|delta| [delta.old_file().path(), delta.new_file().path()])
+        .flatten()
+        .collect();
+
+    let mut changed = Vec::new();
+    for path in paths {
+        let status = match repo.status_file(path) {
+            Ok(status) => status,
+            Err(error) if error.code() == git2::ErrorCode::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if !status.is_empty() && !status.is_ignored() {
+            changed.push(path.to_string_lossy().into_owned());
+        }
+    }
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Remote;
@@ -326,6 +393,124 @@ mod tests {
         fs::remove_file(&path).unwrap();
         assert!(message.contains("Failed to open repository"), "{message}");
         assert!(message.contains(&path.display().to_string()), "{message}");
+    }
+
+    struct PullFixture {
+        root: PathBuf,
+        origin: git2::Repository,
+        local: git2::Repository,
+    }
+
+    impl Drop for PullFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn commit_file(repo: &git2::Repository, name: &str, content: &str) -> git2::Oid {
+        let workdir = repo.workdir().unwrap();
+        fs::write(workdir.join(name), content).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new(name)).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &signature, &signature, name, &tree, &parents)
+            .unwrap()
+    }
+
+    fn pull_fixture() -> PullFixture {
+        let root = std::env::temp_dir().join(format!(
+            "repo-set-pull-{}-{}",
+            std::process::id(),
+            NEXT_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let origin = git2::Repository::init(root.join("origin")).unwrap();
+        commit_file(&origin, "file.txt", "one\n");
+        let local =
+            git2::Repository::clone(root.join("origin").to_str().unwrap(), root.join("local"))
+                .unwrap();
+        PullFixture {
+            root,
+            origin,
+            local,
+        }
+    }
+
+    fn pull(fixture: &PullFixture) -> anyhow::Result<()> {
+        let filter = RepositoryFilter::new(&[], &[]).unwrap();
+        Remote::new(&[], &[], &fixture.root, &filter, 0).pull(fixture.local.workdir().unwrap())
+    }
+
+    fn local_head(fixture: &PullFixture) -> git2::Oid {
+        fixture.local.head().unwrap().target().unwrap()
+    }
+
+    #[test]
+    fn pull_fast_forwards_branch_and_working_tree() {
+        let fixture = pull_fixture();
+        let new_commit = commit_file(&fixture.origin, "file.txt", "two\n");
+
+        pull(&fixture).unwrap();
+
+        assert_eq!(local_head(&fixture), new_commit);
+        let branch = fixture
+            .local
+            .head()
+            .unwrap()
+            .shorthand()
+            .unwrap()
+            .to_string();
+        let tracking = fixture
+            .local
+            .find_reference(&format!("refs/remotes/origin/{branch}"))
+            .unwrap();
+        assert_eq!(tracking.target(), Some(new_commit));
+        let content = fs::read_to_string(fixture.root.join("local/file.txt")).unwrap();
+        assert_eq!(content, "two\n");
+        assert!(fixture.local.statuses(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn pull_refuses_to_overwrite_local_changes() {
+        let fixture = pull_fixture();
+        let before = local_head(&fixture);
+        commit_file(&fixture.origin, "file.txt", "two\n");
+        fs::write(fixture.root.join("local/file.txt"), "local\n").unwrap();
+
+        let message = format!("{:#}", pull(&fixture).unwrap_err());
+
+        assert!(message.contains("would be overwritten"), "{message}");
+        assert_eq!(local_head(&fixture), before);
+        let content = fs::read_to_string(fixture.root.join("local/file.txt")).unwrap();
+        assert_eq!(content, "local\n");
+    }
+
+    #[test]
+    fn pull_refuses_local_changes_identical_to_upstream() {
+        let fixture = pull_fixture();
+        let before = local_head(&fixture);
+        commit_file(&fixture.origin, "file.txt", "two\n");
+        fs::write(fixture.root.join("local/file.txt"), "two\n").unwrap();
+
+        let message = format!("{:#}", pull(&fixture).unwrap_err());
+
+        assert!(message.contains("would be overwritten"), "{message}");
+        assert_eq!(local_head(&fixture), before);
+    }
+
+    #[test]
+    fn pull_refuses_diverged_history() {
+        let fixture = pull_fixture();
+        commit_file(&fixture.origin, "file.txt", "two\n");
+        let local_commit = commit_file(&fixture.local, "other.txt", "local\n");
+
+        let message = format!("{:#}", pull(&fixture).unwrap_err());
+
+        assert!(message.contains("cannot fast-forward"), "{message}");
+        assert_eq!(local_head(&fixture), local_commit);
     }
 }
 
