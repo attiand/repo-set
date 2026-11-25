@@ -3,7 +3,6 @@ use git2::Repository;
 use repo_set::config::RepositoryFilter;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 /// A single `git status --short` entry: the two-character status code and path.
 pub struct FileStatus {
@@ -177,7 +176,7 @@ impl<'a> Local<'a> {
 
         // libgit2 does not run git hooks, so run commit-msg ourselves (e.g. for
         // the Gerrit Change-Id hook) and use the possibly edited message.
-        let message = run_commit_msg_hook(&repo, message)?;
+        let message = crate::hooks::run_commit_msg_hook(&repo, message)?;
 
         let signature = repo.signature()?;
         repo.commit(
@@ -256,33 +255,6 @@ impl<'a> Local<'a> {
 
 fn open_repository(dst: &Path) -> anyhow::Result<Repository> {
     Repository::open(dst).with_context(|| format!("Failed to open repository {}", dst.display()))
-}
-
-/// Run the repository's `commit-msg` hook (if present) on `message`, returning
-/// the possibly edited message. libgit2 never runs hooks, so we replicate what
-/// git does: write the message to a file, invoke the hook with its path, and
-/// read the result back.
-fn run_commit_msg_hook(repo: &Repository, message: &str) -> anyhow::Result<String> {
-    let hook = repo.path().join("hooks").join("commit-msg");
-    if !hook.is_file() {
-        return Ok(message.to_string());
-    }
-
-    let msg_path = repo.path().join("COMMIT_EDITMSG");
-    fs::write(&msg_path, message)?;
-
-    let mut command = Command::new(&hook);
-    command.arg(&msg_path);
-    if let Some(workdir) = repo.workdir() {
-        command.current_dir(workdir);
-    }
-
-    let status = command.status()?;
-    if !status.success() {
-        return Err(anyhow::anyhow!("commit-msg hook failed"));
-    }
-
-    Ok(fs::read_to_string(&msg_path)?)
 }
 
 /// Map a git2 status to the index (X) and worktree (Y) `git status --short` flags.

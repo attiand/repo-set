@@ -39,6 +39,7 @@ for a description and examples.
 - `bin/repo-set/config.rs` — private `RepoSetConfig` and push options.
 - `remote.rs` — `Remote`: methods that operates on the remote repo.
 - `local.rs` — `Local`: methods that operates on a local repo.
+- `hooks.rs` — Run git hooks.
 - `status.rs` — `ls`/status output helpers.
 - `pool.rs` — I/O-friendly worker-thread pool for parallel operations.
 - `progress.rs` — progress reporting over a crossbeam channel.

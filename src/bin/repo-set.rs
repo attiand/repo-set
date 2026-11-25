@@ -1,3 +1,5 @@
+#[path = "../hooks.rs"]
+mod hooks;
 #[path = "../local.rs"]
 mod local;
 #[path = "../pool.rs"]
