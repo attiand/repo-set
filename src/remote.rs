@@ -126,13 +126,20 @@ impl<'a> Remote<'a> {
         Ok(())
     }
 
+    /// Fetch all branches (using origin's configured refspecs) and all tags,
+    /// like `git fetch --tags origin`.
     pub fn fetch(&self, dst: &Path) -> anyhow::Result<()> {
         if self.debug > 0 {
             crate::debug::log(self.root, &format!("[debug] fetch {}", dst.display()))?;
         }
 
         let repo = open_repository(dst)?;
-        self.fetch_origin(&repo, dst)
+        let mut fo = git2::FetchOptions::new();
+        fo.remote_callbacks(self.callbacks(dst.display().to_string()));
+        fo.download_tags(git2::AutotagOption::All);
+
+        repo.find_remote("origin")
+            .and_then(|mut remote| remote.fetch::<&str>(&[], Some(&mut fo), None))
             .with_context(|| format!("Failed to fetch repository {}", dst.display()))?;
         Ok(())
     }
@@ -218,9 +225,9 @@ impl<'a> Remote<'a> {
         Ok(())
     }
 
-    /// Fetch the current branch from `origin`, returning the branch name and the
-    /// fetched commit. The branch is fetched explicitly so we don't depend on a
-    /// configured upstream tracking branch.
+    /// Fetch the current branch and all tags from `origin`, returning the branch
+    /// name and the fetched commit. The branch is fetched explicitly so we don't
+    /// depend on a configured upstream tracking branch.
     fn fetch_origin<'r>(
         &self,
         repo: &'r Repository,
@@ -228,6 +235,8 @@ impl<'a> Remote<'a> {
     ) -> anyhow::Result<(String, git2::AnnotatedCommit<'r>)> {
         let mut fo = git2::FetchOptions::new();
         fo.remote_callbacks(self.callbacks(dst.display().to_string()));
+        // libgit2's default auto-follow misses tags whose commit is already local.
+        fo.download_tags(git2::AutotagOption::All);
 
         let branch = {
             let head = repo.head()?;
@@ -240,8 +249,18 @@ impl<'a> Remote<'a> {
         let mut remote = repo.find_remote("origin")?;
         remote.fetch(&[branch.as_str()], Some(&mut fo), None)?;
 
-        let fetch_head = repo.find_reference("FETCH_HEAD")?;
-        let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
+        // FETCH_HEAD also lists the tags, so pick the entry marked for merge.
+        let mut merge_entry = None;
+        repo.fetchhead_foreach(|ref_name, url, oid, is_merge| {
+            if is_merge && merge_entry.is_none() {
+                merge_entry = Some((ref_name.to_string(), url.to_vec(), *oid));
+            }
+            true
+        })?;
+        let (ref_name, url, oid) =
+            merge_entry.ok_or_else(|| anyhow!("branch {} not found on origin", branch))?;
+        let url = String::from_utf8_lossy(&url);
+        let fetch_commit = repo.annotated_commit_from_fetchhead(&ref_name, &url, &oid)?;
 
         Ok((branch, fetch_commit))
     }
@@ -499,6 +518,67 @@ mod tests {
 
         assert!(message.contains("would be overwritten"), "{message}");
         assert_eq!(local_head(&fixture), before);
+    }
+
+    #[test]
+    fn fetch_downloads_all_branches_and_tags() {
+        let fixture = pull_fixture();
+        let base = fixture.origin.head().unwrap().peel_to_commit().unwrap();
+        let tree = base.tree().unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        let side = fixture
+            .origin
+            .commit(None, &signature, &signature, "side", &tree, &[&base])
+            .unwrap();
+        let side_commit = fixture.origin.find_commit(side).unwrap();
+        fixture
+            .origin
+            .branch("feature", &side_commit, false)
+            .unwrap();
+        let tagged = fixture
+            .origin
+            .commit(None, &signature, &signature, "tagged", &tree, &[&base])
+            .unwrap();
+        let tagged_object = fixture.origin.find_object(tagged, None).unwrap();
+        fixture
+            .origin
+            .tag_lightweight("v1.0", &tagged_object, false)
+            .unwrap();
+
+        let filter = RepositoryFilter::new(&[], &[]).unwrap();
+        Remote::new(&[], &[], &fixture.root, &filter, 0)
+            .fetch(fixture.local.workdir().unwrap())
+            .unwrap();
+
+        let branch = fixture
+            .local
+            .find_reference("refs/remotes/origin/feature")
+            .unwrap();
+        assert_eq!(branch.target(), Some(side));
+        let tag = fixture.local.find_reference("refs/tags/v1.0").unwrap();
+        assert_eq!(tag.target(), Some(tagged));
+    }
+
+    #[test]
+    fn pull_downloads_annotated_tag_on_already_fetched_commit() {
+        let fixture = pull_fixture();
+        let head = fixture
+            .origin
+            .head()
+            .unwrap()
+            .peel(git2::ObjectType::Commit)
+            .unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tag = fixture
+            .origin
+            .tag("8.9.7", &head, &signature, "release", false)
+            .unwrap();
+
+        pull(&fixture).unwrap();
+
+        let local_tag = fixture.local.find_reference("refs/tags/8.9.7").unwrap();
+        assert_eq!(local_tag.target(), Some(tag));
+        assert_eq!(local_head(&fixture), head.id());
     }
 
     #[test]

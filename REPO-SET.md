@@ -21,7 +21,7 @@ List remote, local or difference between remote and local.
 
 ## fetch
 
-Fetch all local repos.
+Fetch all branches and tags from `origin` for all local repos.
 
 ## pull
 

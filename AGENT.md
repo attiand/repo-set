@@ -4,7 +4,8 @@ Guidance for AI coding agents working in this repository.
 
 ## Project
 
-The project produces two Rust CLI applications. Git operations use `git2` (libgit2). CLI arguments are handled by Clap.
+The project produces two Rust CLI applications. Git operations use `git2` (libgit2), there should be no dependency on the `git` binary.
+CLI arguments are handled by Clap.
 
 `repo-set` manages a set of git repositories under a root directory. A single command (clone, pull, fetch, push, status, reset, clean, stage, commit) operates on every
 repository in the set. 
