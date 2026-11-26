@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,3 +24,54 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            ext: ""
+            archive: tar.gz
+          - target: x86_64-pc-windows-gnu
+            ext: ".exe"
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW toolchain
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build release
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package binaries
+        id: package
+        run: |
+          ARCHIVE="repo-set-${{ matrix.target }}.${{ matrix.archive }}"
+          cd target/${{ matrix.target }}/release
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            zip "$GITHUB_WORKSPACE/$ARCHIVE" repo-set${{ matrix.ext }} remote-repo${{ matrix.ext }}
+          else
+            tar -czf "$GITHUB_WORKSPACE/$ARCHIVE" repo-set${{ matrix.ext }} remote-repo${{ matrix.ext }}
+          fi
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-set-${{ matrix.target }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
